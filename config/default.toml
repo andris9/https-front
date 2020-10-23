@@ -38,6 +38,10 @@
 [proxy]
     # All requests are proxied to the following origin
     origin = "http://localhost:3000/"
+    # Optional response headers
+    #[[proxy.headers]]
+    #    key = "Server"
+    #    value = "https-front/1.0.0"
 
 [redis]
     host = "127.0.0.1"
