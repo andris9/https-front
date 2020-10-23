@@ -27,20 +27,24 @@
 [acme]
     key = "test" # identifier for Redis keys
     directoryUrl = "https://acme-staging-v02.api.letsencrypt.org/directory"
-    email = "andris@kreata.ee"
+    email = "domainadmin@example.com"
 
 # ACME production settings
 #[acme]
 #    key = "production"
 #    directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
-#    email = "andris@kreata.ee"
+#    email = "domainadmin@example.com"
 
 [proxy]
     # All requests are proxied to the following origin
     origin = "http://localhost:3000/"
+    
+    # Error page to show if connection to origin fails
+    error502 = "./errors/502.html"
+    
     # Optional response headers
     #[[proxy.headers]]
-    #    key = "Server"
+    #    key = "server"
     #    value = "https-front/1.0.0"
 
 [redis]

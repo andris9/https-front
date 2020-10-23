@@ -29,7 +29,7 @@ httpsServer.on('newSession', function (id, data, cb) {
             cb();
         })
         .catch(err => {
-            log.error('TLS', 'Failed to store TLS ticket: %s', err.stack);
+            log.error('TLS', 'Failed to store TLS ticket: %s', err.message);
             cb();
         });
 });
@@ -45,17 +45,17 @@ httpsServer.on('resumeSession', function (id, cb) {
             cb(null, result?.[0]?.[1] || null);
         })
         .catch(err => {
-            log.error('TLS', 'Failed to retrieve TLS ticket: %s', err.stack);
+            log.error('TLS', 'Failed to retrieve TLS ticket: %s', err.message);
             cb(null);
         });
 });
 
 httpsServer.on('error', err => {
-    log.error('HTTPS', 'HTTPS server error: %s', err.stack);
+    log.error('HTTPS', 'HTTPS server error: %s', err.message);
 });
 
 httpServer.on('error', err => {
-    log.error('HTTP', 'HTTP server error: %s', err.stack);
+    log.error('HTTP', 'HTTP server error: %s', err.message);
 });
 
 const startHttp = () => {
