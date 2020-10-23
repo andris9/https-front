@@ -7,7 +7,7 @@ Main use case - you want to expose the same origin via unknown amount of domain 
 ## Features
 
 -   All requests, no matter the domain name, are proxied to a single configured origin
--   HTTPS requests get certificate generated on first request
+-   HTTPS certificates get generated on first request
 -   Certificates are renewed for active domain names only
 -   All data is stored in Redis, so you can run several instances in different servers that all share the same certificate pool
 
