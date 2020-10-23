@@ -15,7 +15,7 @@
 
 # Only generate certificates for domain names that pass the following DNS validation
 # At least one of the response rows must match the expected value
-#[precheck]
+#[[precheck]]
 #    key = "A" # A, AAAA, CNAME
 #    expected = "188.165.168.22"
 
