@@ -42,6 +42,8 @@
     # Error page to show if connection to origin fails
     error502 = "./errors/502.html"
     
+    workers = 2
+
     # Optional response headers
     #[[proxy.headers]]
     #    key = "server"
