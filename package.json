@@ -30,8 +30,8 @@
         "wild-config": "1.5.1"
     },
     "devDependencies": {
-        "eslint": "7.9.0",
+        "eslint": "7.11.0",
         "eslint-config-nodemailer": "1.2.0",
-        "eslint-config-prettier": "6.11.0"
+        "eslint-config-prettier": "6.14.0"
     }
 }

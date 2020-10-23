@@ -23,16 +23,16 @@
 #    ns = ["8.8.8.8", "1.1.1.1"]
 
 # ACME staging settings
-#[acme]
-#    key = "test" # identifier for Redis keys
-#    directoryUrl = "https://acme-staging-v02.api.letsencrypt.org/directory"
-#    email = "andris@kreata.ee"
+[acme]
+    key = "test" # identifier for Redis keys
+    directoryUrl = "https://acme-staging-v02.api.letsencrypt.org/directory"
+    email = "andris@kreata.ee"
 
 # ACME production settings
-[acme]
-    key = "production"
-    directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
-    email = "andris@kreata.ee"
+#[acme]
+#    key = "production"
+#    directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
+#    email = "andris@kreata.ee"
 
 [proxy]
     # All requests are proxied to the following origin
