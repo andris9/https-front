@@ -2,6 +2,8 @@
 
 Simple HTTP/HTTPS proxy server that generously tries to set up LE HTTP certificates for any domain.
 
+Main use case - you want to expose the same origin via unknown amount of domain names that might require HTTPS.
+
 ## Features
 
 -   All requests, no matter the domain name, are proxied to a single configured origin
@@ -28,6 +30,16 @@ $ npm install --production
 ```
 $ npm start
 ```
+
+## Default Certificates
+
+Default certificate files reside in [setup](setup) folder. You can regenerate these by running
+
+```
+$ npm run testcerts
+```
+
+This will take some time as a new dhparam file is generated as well.
 
 ## License
 

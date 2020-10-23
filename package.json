@@ -1,11 +1,12 @@
 {
     "name": "https-front",
     "version": "1.0.0",
-    "description": "",
+    "description": "Simple HTTPS proxy for single origin",
     "main": "index.js",
     "scripts": {
         "start": "node index.js",
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "testcerts": "openssl dhparam -out setup/dhparam.pem 2048 && openssl req -subj \"/CN=https-front.local/O=Andris/C=EE\" -new -newkey rsa:2048 -days 365 -nodes -x509 -keyout setup/https-privkey.pem -out setup/https-cert.pem"
     },
     "keywords": [],
     "author": {

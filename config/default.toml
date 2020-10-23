@@ -4,23 +4,39 @@
 
 [https]
     port = 8443
+
+    # Default certificates
     key = "./setup/https-privkey.pem"
     cert = "./setup/https-cert.pem"
     dhParam = "./setup/dhparam.pem"
+
     ciphers = "ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384"
+    sessionIdContext = "https-front"
 
+# Only generate certificates for domain names that pass the following DNS validation
+[precheck]
+    key = "A" # A, AAAA, CNAME
+    expected = "188.165.168.22"
+
+# Set to use specific DNS servers for domain validation
+#[resolver]
+#    ns = ["8.8.8.8", "1.1.1.1"]
+
+# ACME staging settings
+#[acme]
+#    key = "test" # identifier for Redis keys
+#    directoryUrl = "https://acme-staging-v02.api.letsencrypt.org/directory"
+#    email = "andris@kreata.ee"
+
+# ACME production settings
 [acme]
-    key = "def"
-    directoryUrl = "https://acme-staging-v02.api.letsencrypt.org/directory"
-    email = "andris@kreata.ee"
-
-[sacme]
     key = "production"
     directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
     email = "andris@kreata.ee"
 
 [proxy]
-    origin = "https://www.neti.ee/"
+    # All requests are proxied to the following origin
+    origin = "http://localhost:3000/"
 
 [redis]
     host = "127.0.0.1"
