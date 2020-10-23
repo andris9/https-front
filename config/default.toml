@@ -1,0 +1,28 @@
+
+[http]
+    port = 8080
+
+[https]
+    port = 8443
+    key = "./setup/https-privkey.pem"
+    cert = "./setup/https-cert.pem"
+    dhParam = "./setup/dhparam.pem"
+    ciphers = "ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384"
+
+[acme]
+    key = "def"
+    directoryUrl = "https://acme-staging-v02.api.letsencrypt.org/directory"
+    email = "andris@kreata.ee"
+
+[sacme]
+    key = "production"
+    directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
+    email = "andris@kreata.ee"
+
+[proxy]
+    origin = "https://www.neti.ee/"
+
+[redis]
+    host = "127.0.0.1"
+    port = 6379
+    db   = 4
