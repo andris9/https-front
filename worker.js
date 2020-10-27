@@ -61,14 +61,14 @@ httpServer.on('error', err => {
 const startHttp = () => {
     return new Promise((resolve, reject) => {
         httpServer.once('error', reject);
-        httpServer.listen(config.http.port, () => resolve());
+        httpServer.listen(config.http.port, config.http.host, () => resolve());
     });
 };
 
 const startHttps = () => {
     return new Promise((resolve, reject) => {
         httpsServer.once('error', reject);
-        httpsServer.listen(config.https.port, () => resolve());
+        httpsServer.listen(config.https.port, config.https.host, () => resolve());
     });
 };
 
