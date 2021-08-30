@@ -19,7 +19,7 @@ const httpsServer = https.createServer(httpsCredentials, (req, res) => {
     return app(req, res);
 });
 
-httpsServer.on('newSession', function (id, data, cb) {
+httpsServer.on('newSession', (id, data, cb) => {
     redisClient
         .multi()
         .set(`tls:${id.toString('hex')}`, data)
@@ -34,7 +34,7 @@ httpsServer.on('newSession', function (id, data, cb) {
         });
 });
 
-httpsServer.on('resumeSession', function (id, cb) {
+httpsServer.on('resumeSession', (id, cb) => {
     redisClient
         .multi()
         .getBuffer(`tls:${id.toString('hex')}`)
@@ -58,19 +58,17 @@ httpServer.on('error', err => {
     log.error('HTTP', 'HTTP server error: %s', err.message);
 });
 
-const startHttp = () => {
-    return new Promise((resolve, reject) => {
+const startHttp = () =>
+    new Promise((resolve, reject) => {
         httpServer.once('error', reject);
         httpServer.listen(config.http.port, config.http.host, () => resolve());
     });
-};
 
-const startHttps = () => {
-    return new Promise((resolve, reject) => {
+const startHttps = () =>
+    new Promise((resolve, reject) => {
         httpsServer.once('error', reject);
         httpsServer.listen(config.https.port, config.https.host, () => resolve());
     });
-};
 
 const start = async () => {
     await Promise.all([startHttp(), startHttps()]);
@@ -78,9 +76,28 @@ const start = async () => {
 
 start()
     .then(() => {
-        log.info('Server', 'Server started');
+        if (config.proxy.group) {
+            try {
+                process.setgid(config.proxy.group);
+                log.info('Worker', 'Changed group to "%s" (%s)', config.proxy.group, process.getgid());
+            } catch (E) {
+                log.error('Worker', 'Failed to change group to "%s" (%s)', config.proxy.group, E.message);
+                return setTimeout(() => process.exit(1), 3000);
+            }
+        }
+        if (config.proxy.user) {
+            try {
+                process.setuid(config.proxy.user);
+                log.info('Worker', 'Changed user to "%s" (%s)', config.proxy.user, process.getuid());
+            } catch (E) {
+                log.error('Worker', 'Failed to change user to "%s" (%s)', config.proxy.user, E.message);
+                return setTimeout(() => process.exit(1), 3000);
+            }
+        }
+
+        log.info('Worker', 'Server started');
     })
     .catch(err => {
-        log.error('Server', err);
+        log.error('Worker', err);
         process.exit(1);
     });

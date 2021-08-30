@@ -18,20 +18,21 @@
         "@fidm/x509": "1.2.1",
         "@root/acme": "3.1.0",
         "@root/csr": "0.8.1",
+        "axios": "^0.21.1",
         "http-proxy": "1.18.1",
-        "ioredfour": "1.0.2-ioredis-03",
-        "ioredis": "4.17.3",
-        "ipaddr.js": "2.0.0",
-        "joi": "17.2.1",
+        "ioredfour": "1.2.0-ioredis-06",
+        "ioredis": "4.27.8",
+        "ipaddr.js": "2.0.1",
+        "joi": "17.4.2",
         "node-rsa": "1.1.1",
-        "npmlog": "4.1.2",
+        "npmlog": "5.0.0",
         "pem-jwk": "2.0.0",
-        "uuid": "8.3.1",
+        "uuid": "8.3.2",
         "wild-config": "1.5.1"
     },
     "devDependencies": {
-        "eslint": "7.11.0",
+        "eslint": "7.32.0",
         "eslint-config-nodemailer": "1.2.0",
-        "eslint-config-prettier": "6.14.0"
+        "eslint-config-prettier": "8.3.0"
     }
 }

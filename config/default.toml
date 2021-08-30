@@ -35,6 +35,20 @@
 #    directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
 #    email = "domainadmin@example.com"
 
+[validate]
+    # If enabled then validate domains against provided URL before acquireing a certificate
+    enabled = false
+    url = "http://localhost:3000/"
+    method = "get" # GET or POST request
+    format = "json" # request format for POST, either "json" or "form"
+    key = "domain" # key for the domain name
+    [validate.expect]
+        status = [200, 201]
+        # Search for specific JSON key, use dot notation for subkeys eg "response.status"
+        #key = "success"
+        #value = true # Expected value for key
+    
+
 [proxy]
     # All requests are proxied to the following origin
     origin = "http://localhost:3000/"
@@ -43,6 +57,10 @@
     error502 = "./errors/502.html"
     
     workers = 2
+
+    # Downgrade user once HTTP/S ports are bound
+    #user="www-data"
+    #group="www-data
 
     # Optional response headers
     #[[proxy.headers]]
