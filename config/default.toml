@@ -13,16 +13,6 @@
     ciphers = "ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384"
     sessionIdContext = "https-front"
 
-# Only generate certificates for domain names that pass the following DNS validation
-# At least one of the response rows must match the expected value
-#[[precheck]]
-#    key = "A" # A, AAAA, CNAME
-#    expected = "188.165.168.22"
-
-# Set to use specific DNS servers for domain validation
-#[resolver]
-#    ns = ["8.8.8.8", "1.1.1.1"]
-
 # ACME staging settings
 [acme]
     key = "test" # identifier for Redis keys
@@ -35,15 +25,28 @@
 #    directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
 #    email = "domainadmin@example.com"
 
-[validate]
-    # If enabled then validate domains against provided URL before acquireing a certificate
+# Only generate certificates for domain names that pass the following DNS validation
+# At least one of the response rows must match the expected value
+#[[precheck]]
+#    key = "A" # A, AAAA, CNAME
+#    expected = "188.165.168.22"
+
+# Set to use specific DNS servers for domain validation
+#[resolver]
+#    ns = ["8.8.8.8", "1.1.1.1"]
+
+# Validate domain names against the provided URL before provisioning a certificate.
+# If enabled then https-front makes a GET or POST request against that URL and only
+# continues with the provisioning if the response matches expectations.
+[checkUrl]
     enabled = false
     url = "http://localhost:3000/"
     method = "get" # GET or POST request
-    format = "json" # request format for POST, either "json" or "form"
     key = "domain" # key for the domain name
+    format = "json" # request format for POST, either "json" or "form"
+
     [validate.expect]
-        status = [200, 201]
+        status = [200, 201] # allowed response status codes
         # Search for specific JSON key, use dot notation for subkeys eg "response.status"
         #key = "success"
         #value = true # Expected value for key
