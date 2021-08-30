@@ -47,9 +47,13 @@
 
     [checkUrl.expect]
         status = [200, 201] # allowed response status codes
+
         # Search for specific JSON key, use dot notation for subkeys eg "response.status"
         #key = "success"
         #value = true # Expected value for key
+
+        # Look for a string match if response is not JSON
+        #textMatch = "success" # Response body must contain this string
     
 
 [proxy]
