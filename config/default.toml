@@ -45,7 +45,7 @@
     key = "domain" # key for the domain name
     format = "json" # request format for POST, either "json" or "form"
 
-    [validate.expect]
+    [checkUrl.expect]
         status = [200, 201] # allowed response status codes
         # Search for specific JSON key, use dot notation for subkeys eg "response.status"
         #key = "success"
