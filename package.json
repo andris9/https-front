@@ -1,6 +1,6 @@
 {
     "name": "https-front",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "description": "Simple HTTPS proxy for single origin",
     "main": "index.js",
     "scripts": {
@@ -18,20 +18,20 @@
         "@fidm/x509": "1.2.1",
         "@root/acme": "3.1.0",
         "@root/csr": "0.8.1",
-        "axios": "^0.21.1",
+        "axios": "0.25.0",
         "http-proxy": "1.18.1",
         "ioredfour": "1.2.0-ioredis-06",
-        "ioredis": "4.27.8",
+        "ioredis": "4.28.3",
         "ipaddr.js": "2.0.1",
-        "joi": "17.4.2",
+        "joi": "17.6.0",
         "node-rsa": "1.1.1",
-        "npmlog": "5.0.0",
+        "npmlog": "6.0.0",
         "pem-jwk": "2.0.0",
         "uuid": "8.3.2",
         "wild-config": "1.5.1"
     },
     "devDependencies": {
-        "eslint": "7.32.0",
+        "eslint": "8.8.0",
         "eslint-config-nodemailer": "1.2.0",
         "eslint-config-prettier": "8.3.0"
     }
