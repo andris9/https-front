@@ -3,8 +3,9 @@
 /* eslint global-require: 0 */
 
 const cluster = require('cluster');
-const log = require('npmlog');
 const config = require('wild-config');
+const pino = require('pino')();
+const logger = pino.child({ app: 'https-front', component: 'cluster' });
 
 let closing = false;
 const closeProcess = code => {
@@ -12,19 +13,39 @@ const closeProcess = code => {
         return;
     }
     closing = true;
-    setTimeout(() => {
-        process.exit(code);
-    }, 10);
+    if (cluster.isMaster) {
+        logger.info({ msg: 'Closing the application...', code });
+    }
+    process.exit(code);
 };
 
-process.on('uncaughtException', () => closeProcess(1));
-process.on('unhandledRejection', () => closeProcess(2));
-process.on('SIGTERM', () => closeProcess(0));
-process.on('SIGINT', () => closeProcess(0));
+process.on('uncaughtException', err => {
+    logger.fatal({ msg: 'uncaughtException', err });
+    closeProcess(1);
+});
+
+process.on('unhandledRejection', err => {
+    logger.fatal({ msg: 'uncaughtException', err });
+    closeProcess(2);
+});
+
+process.on('SIGTERM', () => {
+    if (cluster.isMaster) {
+        logger.info({ msg: 'Received SIGTERM', signal: 'SIGTERM' });
+    }
+    closeProcess(0);
+});
+
+process.on('SIGINT', () => {
+    if (cluster.isMaster) {
+        logger.info({ msg: 'Received SIGINT', signal: 'SIGINT' });
+    }
+    closeProcess(0);
+});
 
 if (cluster.isMaster) {
     process.title = 'https-front: main';
-    log.info('Cluster', 'Master process started');
+    logger.info({ msg: 'Master process started', workers: config.proxy.workers });
 
     const fork = () => {
         if (closing) {
@@ -32,7 +53,7 @@ if (cluster.isMaster) {
         }
         let worker = cluster.fork();
         worker.on('online', () => {
-            log.info('Cluster', 'Worker came online: %s', worker.process.pid);
+            logger.info({ msg: 'Worker came online', worker: worker.process.pid });
         });
     };
 
@@ -44,7 +65,7 @@ if (cluster.isMaster) {
         if (closing) {
             return;
         }
-        log.info('Cluster', 'Worker died: %s (%s, %s)', worker.process.pid, code, signal);
+        logger.error({ msg: 'Worker died', worker: worker.process.pid, code, signal });
         setTimeout(() => fork(), 2000).unref();
     });
 } else {

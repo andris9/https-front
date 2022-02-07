@@ -4,10 +4,12 @@ const http = require('http');
 const https = require('https');
 
 const config = require('wild-config');
-const log = require('npmlog');
 const { httpsCredentials } = require('./lib/sni');
 const { redisClient } = require('./lib/db');
 const { app } = require('./lib/app');
+
+const pino = require('pino')();
+const logger = pino.child({ app: 'https-front', component: 'worker' });
 
 const httpServer = http.createServer((req, res) => {
     req.proto = 'http';
@@ -29,7 +31,7 @@ httpsServer.on('newSession', (id, data, cb) => {
             cb();
         })
         .catch(err => {
-            log.error('TLS', 'Failed to store TLS ticket: %s', err.message);
+            logger.error({ msg: 'Failed to store TLS ticket', id, data, err });
             cb();
         });
 });
@@ -45,17 +47,17 @@ httpsServer.on('resumeSession', (id, cb) => {
             cb(null, result?.[0]?.[1] || null);
         })
         .catch(err => {
-            log.error('TLS', 'Failed to retrieve TLS ticket: %s', err.message);
+            logger.error({ msg: 'Failed to retrieve TLS ticket', err, id });
             cb(null);
         });
 });
 
 httpsServer.on('error', err => {
-    log.error('HTTPS', 'HTTPS server error: %s', err.message);
+    logger.error({ msg: 'Web server error', proto: 'https', err });
 });
 
 httpServer.on('error', err => {
-    log.error('HTTP', 'HTTP server error: %s', err.message);
+    logger.error({ msg: 'Web server error', proto: 'http', err });
 });
 
 const startHttp = () =>
@@ -79,25 +81,25 @@ start()
         if (config.proxy.group) {
             try {
                 process.setgid(config.proxy.group);
-                log.info('Worker', 'Changed group to "%s" (%s)', config.proxy.group, process.getgid());
+                logger.info({ msg: 'Changed group', group: config.proxy.group, gid: process.getgid() });
             } catch (E) {
-                log.error('Worker', 'Failed to change group to "%s" (%s)', config.proxy.group, E.message);
+                logger.fatal({ msg: 'Failed to change group', group: config.proxy.group, err: E });
                 return setTimeout(() => process.exit(1), 3000);
             }
         }
         if (config.proxy.user) {
             try {
                 process.setuid(config.proxy.user);
-                log.info('Worker', 'Changed user to "%s" (%s)', config.proxy.user, process.getuid());
+                logger.info({ msg: 'Changed user', user: config.proxy.user, uid: process.getuid() });
             } catch (E) {
-                log.error('Worker', 'Failed to change user to "%s" (%s)', config.proxy.user, E.message);
+                logger.fatal({ msg: 'Failed to change user', user: config.proxy.user, err: E });
                 return setTimeout(() => process.exit(1), 3000);
             }
         }
 
-        log.info('Worker', 'Server started');
+        logger.info('Server started');
     })
     .catch(err => {
-        log.error('Worker', err);
+        logger.fatal({ msg: 'Failed to start server', err });
         process.exit(1);
     });
