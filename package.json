@@ -26,8 +26,8 @@
         "joi": "17.6.0",
         "node-rsa": "1.1.1",
         "pem-jwk": "2.0.0",
-        "pino": "^7.6.5",
-        "punycode": "^2.1.1",
+        "pino": "7.6.5",
+        "punycode": "2.1.1",
         "uuid": "8.3.2",
         "wild-config": "1.5.1"
     },
