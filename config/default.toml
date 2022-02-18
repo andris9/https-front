@@ -35,6 +35,10 @@
 #[resolver]
 #    ns = ["8.8.8.8", "1.1.1.1"]
 
+[extraChecks]
+# if not allowed then checks if the subdomain might be a wildcard domain and blocks certificates if it is
+wildCardAllowed = false
+
 # Validate domain names against the provided URL before provisioning a certificate.
 # If enabled then https-front makes a GET or POST request against that URL and only
 # continues with the provisioning if the response matches expectations.
