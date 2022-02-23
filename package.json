@@ -30,11 +30,11 @@
         "psl": "1.8.0",
         "punycode": "2.1.1",
         "uuid": "8.3.2",
-        "wild-config": "1.5.1"
+        "wild-config": "1.6.0"
     },
     "devDependencies": {
         "eslint": "8.9.0",
         "eslint-config-nodemailer": "1.2.0",
-        "eslint-config-prettier": "8.3.0"
+        "eslint-config-prettier": "8.4.0"
     }
 }
