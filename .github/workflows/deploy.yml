@@ -1,0 +1,19 @@
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - 'templates/**'
+      - 'test/**'
+      - '*.yaml'
+      - '*.md'
+
+name: Deploy to Production
+
+jobs:
+  deploy:
+    uses: outfunnel/devops-public/.github/workflows/deploy.yml@master
+    secrets: inherit
+    with:
+      skip_deploy: true
