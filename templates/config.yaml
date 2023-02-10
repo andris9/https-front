@@ -1,0 +1,54 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: https-front
+data:
+  # TODO: Autogenerate this, it's not exactly secret but still
+  dhparam.pem: |
+    -----BEGIN DH PARAMETERS-----
+    MIIBCAKCAQEA1BKxoQ73UYwzZb+h04l0uuGi6Frp/MZ2NfQcYJN/dSq9bwcUU0F+
+    YOE+0bLQ1CEtKnro2MAedBFnKoLqOoSq3pp4f1fw8W7FG34NG7QXEdePiGp/7Qei
+    Li+B6epioUjIZlmP+9CgIkYbahLyYOV0oEValCt4CaCiPb1Sdp5ZzBRCELF9wk35
+    +Ffe99ohyjMa7gvE8MjCQFtIQHQOiK+/P8H3Jdhk90Mon+sj7yMwliPyWcyME8+o
+    Y1AM9JINQrZF6PXuRvmaFSy7h+yVyRje8zjSd0U9rdFgHIoKHlNfSIepBs+FM1hm
+    vyj2e0k4wZxivmk95jS2KzT+lDMTUgQV8wIBAg==
+    -----END DH PARAMETERS-----
+  https-front.toml: |
+    [http]
+        port = 8080
+        host = "0.0.0.0"
+    [https]
+        port = 8443
+        host = "0.0.0.0"
+        key = "/etc/outfunnel/tls/tls.key"
+        cert = "/etc/outfunnel/tls/tls.crt"
+        dhParam = "/etc/outfunnel/dhparam.pem"
+        ciphers = "ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384"
+        sessionIdContext = "https-front"
+    [[precheck]]
+        key = "CNAME"
+        expected = "of.outfunnel.com"
+    [[precheck]]
+        key = "CNAME"
+        expected = "tracking.outfunnel.com"
+    # TODO: Restore this with updated IP after migration
+    #[[precheck]]
+    #    key = "A"
+    #    expected = "3.123.154.36"
+    [resolver]
+        ns = ["8.8.8.8", "1.1.1.1"]
+    [acme]
+        key = "production"
+        directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
+        email = "infra@outfunnel.com"
+    [proxy]
+        # This corresponds to aws-mta-01
+        origin = "http://172.31.41.187:5001"
+        [[proxy.headers]]
+            # TODO: This is probably not secure
+            key = "server"
+            value = "nginx"
+    [redis]
+        host= "172.31.35.226"
+        db = 1

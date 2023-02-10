@@ -1,0 +1,82 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: https-front
+spec:
+  replicas: 1
+  revisionHistoryLimit: 0
+  selector:
+    matchLabels: &selectorLabels
+      app: https-front
+  template:
+    metadata:
+      labels: *selectorLabels
+    spec:
+      containers:
+        - name: https-front
+          image: {{ .Values.image }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 200Mi
+            limits:
+              memory: 1400Mi
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: https
+              containerPort: 8443
+          readinessProbe:
+            timeoutSeconds: 30
+            periodSeconds: 60
+            initialDelaySeconds: 5
+            httpGet:
+              path: /health
+              port: http
+          env:
+            - name: NODE_CONFIG_PATH
+              value: /etc/outfunnel/https-front.toml
+            - name: NODE_ENV
+              value: production
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-secrets
+                  key: REDIS_PASSWORD
+          volumeMounts:
+            - name: https-front-config
+              mountPath: /etc/outfunnel/https-front.toml
+              subPath: https-front.toml
+              readOnly: true
+            - name: https-front-secrets
+              mountPath: /etc/outfunnel/dbs.toml
+              subPath: dbs.toml
+              readOnly: true
+            - name: https-front-tls
+              mountPath: /etc/outfunnel/tls
+              readOnly: true
+            - name: https-front-dhparam
+              mountPath: /etc/outfunnel/dhparam.pem
+              subPath: dhparam.pem
+              readOnly: true
+      volumes:
+        - name: https-front-config
+          configMap:
+            name: https-front
+            items:
+              - key: https-front.toml
+                path: https-front.toml
+        - name: https-front-secrets
+          secret:
+            secretName: db-secrets
+            items:
+              - key: dbs.toml
+                path: dbs.toml
+        - name: https-front-tls
+          secret:
+            secretName: of-outfunnel-com
