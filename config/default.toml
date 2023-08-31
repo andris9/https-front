@@ -1,0 +1,84 @@
+
+[http]
+    port = 8080
+
+[https]
+    port = 8443
+
+    # Default certificates
+    key = "./setup/https-privkey.pem"
+    cert = "./setup/https-cert.pem"
+    dhParam = "./setup/dhparam.pem"
+
+    ciphers = "ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384"
+    sessionIdContext = "https-front"
+
+# ACME staging settings
+[acme]
+    key = "test" # identifier for Redis keys
+    directoryUrl = "https://acme-staging-v02.api.letsencrypt.org/directory"
+    email = "domainadmin@example.com"
+
+# ACME production settings
+#[acme]
+#    key = "production"
+#    directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
+#    email = "domainadmin@example.com"
+
+# Only generate certificates for domain names that pass the following DNS validation
+# At least one of the response rows must match the expected value
+#[[precheck]]
+#    key = "A" # A, AAAA, CNAME
+#    expected = "188.165.168.22"
+
+# Set to use specific DNS servers for domain validation
+#[resolver]
+#    ns = ["8.8.8.8", "1.1.1.1"]
+
+[extraChecks]
+# if not allowed then checks if the subdomain might be a wildcard domain and blocks certificates if it is
+wildCardAllowed = false
+
+# Validate domain names against the provided URL before provisioning a certificate.
+# If enabled then https-front makes a GET or POST request against that URL and only
+# continues with the provisioning if the response matches expectations.
+[checkUrl]
+    enabled = false
+    url = "http://localhost:3000/"
+    method = "get" # GET or POST request
+    key = "domain" # key for the domain name
+    format = "json" # request format for POST, either "json" or "form"
+
+    [checkUrl.expect]
+        status = [200, 201] # allowed response status codes
+
+        # Search for specific JSON key, use dot notation for subkeys eg "response.status"
+        #key = "success"
+        #value = true # Expected value for key
+
+        # Look for a string match if response is not JSON
+        #textMatch = "success" # Response body must contain this string
+    
+
+[proxy]
+    # All requests are proxied to the following origin
+    origin = "http://localhost:3000/"
+    
+    # Error page to show if connection to origin fails
+    error502 = "./errors/502.html"
+    
+    workers = 2
+
+    # Downgrade user once HTTP/S ports are bound
+    #user="www-data"
+    #group="www-data
+
+    # Optional response headers
+    #[[proxy.headers]]
+    #    key = "server"
+    #    value = "https-front/1.0.0"
+
+[redis]
+    host = "127.0.0.1"
+    port = 6379
+    db   = 4
