@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.2](https://github.com/andris9/https-front/compare/v1.3.1...v1.3.2) (2023-10-05)
+
+
+### Bug Fixes
+
+* **deploy:** changed env to vars ([a968d17](https://github.com/andris9/https-front/commit/a968d173a8d0a052ef4efa4a968ab25d1b489f3e))
+* **deploy:** changed env to vars ([b638759](https://github.com/andris9/https-front/commit/b6387595e2f85ac3d9c6de417f908dea62376abe))
+
 ## [1.3.1](https://github.com/andris9/https-front/compare/v1.3.0...v1.3.1) (2023-10-05)
 
 
