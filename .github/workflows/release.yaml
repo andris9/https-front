@@ -10,7 +10,7 @@ permissions:
 
 name: release
 jobs:
-    release-please:
+    release_please:
         runs-on: ubuntu-latest
         steps:
             - uses: google-github-actions/release-please-action@v3
@@ -23,4 +23,34 @@ jobs:
             - uses: actions/checkout@v3
               # these if statements ensure that a publication only occurs when
               # a new release is created:
+              if: ${{ steps.release.outputs.release_created }}
+
+            - uses: actions/setup-node@v3
+              with:
+                  node-version: 20
+                  registry-url: 'https://registry.npmjs.org'
+              if: ${{ steps.release.outputs.release_created }}
+
+            - name: 'Install NPM dependencies'
+              run: npm install --omit=dev
+              if: ${{ steps.release.outputs.release_created }}
+
+            - name: 'Create a release file'
+              run: echo ${{ github.sha }} > Release.txt
+              if: ${{ steps.release.outputs.release_created }}
+
+            - name: 'Compress folder'
+              run: tar --exclude-vcs -czf /tmp/${{env.PACKAGE_NAME}}.tar.gz .
+              if: ${{ steps.release.outputs.release_created }}
+
+            - name: Upload Release Asset
+              id: upload-release-asset 
+              uses: actions/upload-release-asset@v1
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+               with:
+                 upload_url: ${{ steps.release_please.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
+                 asset_path: /tmp/${{env.PACKAGE_NAME}}.tar.gz
+                 asset_name: ${{env.PACKAGE_NAME}}.tar.gz
+                 asset_content_type: application/tar+gzip
               if: ${{ steps.release.outputs.release_created }}
