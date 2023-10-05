@@ -17,7 +17,7 @@ jobs:
               id: release
               with:
                   release-type: node
-                  package-name: ${{env.PACKAGE_NAME}}
+                  package-name: ${{vars.PACKAGE_NAME}}
                   pull-request-title-pattern: 'chore${scope}: release ${version} [skip-ci]'
 
             - uses: actions/checkout@v3
@@ -38,7 +38,7 @@ jobs:
               if: ${{ steps.release.outputs.release_created }}
 
             - name: 'Compress folder'
-              run: tar --exclude-vcs -czf /tmp/${{env.PACKAGE_NAME}}.tar.gz .
+              run: tar --exclude-vcs -czf /tmp/${{ vars.PACKAGE_NAME }}.tar.gz .
               if: ${{ steps.release.outputs.release_created }}
 
             - name: 'Upload Release Asset'
@@ -48,7 +48,7 @@ jobs:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               with:
                   upload_url: ${{ steps.release.outputs.upload_url }}
-                  asset_path: /tmp/${{env.PACKAGE_NAME}}.tar.gz
-                  asset_name: ${{env.PACKAGE_NAME}}.tar.gz
+                  asset_path: /tmp/${{vars.PACKAGE_NAME}}.tar.gz
+                  asset_name: ${{vars.PACKAGE_NAME}}.tar.gz
                   asset_content_type: application/tar+gzip
               if: ${{ steps.release.outputs.release_created }}
