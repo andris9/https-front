@@ -18,21 +18,21 @@
         "@fidm/x509": "1.2.1",
         "@root/acme": "3.1.0",
         "@root/csr": "0.8.1",
-        "axios": "1.5.0",
+        "axios": "1.5.1",
         "http-proxy": "1.18.1",
         "ioredfour": "1.2.0-ioredis-07",
         "ioredis": "5.3.2",
         "ipaddr.js": "2.1.0",
-        "joi": "17.10.0",
+        "joi": "17.11.0",
         "pem-jwk": "2.0.0",
-        "pino": "8.15.0",
+        "pino": "8.15.6",
         "psl": "1.9.0",
         "punycode": "2.3.0",
-        "uuid": "9.0.0",
-        "wild-config": "^1.7.0"
+        "uuid": "9.0.1",
+        "wild-config": "1.7.1"
     },
     "devDependencies": {
-        "eslint": "8.48.0",
+        "eslint": "8.50.0",
         "eslint-config-nodemailer": "1.2.0",
         "eslint-config-prettier": "9.0.0"
     }
