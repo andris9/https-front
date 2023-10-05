@@ -19,6 +19,7 @@ jobs:
                   release-type: node
                   package-name: ${{vars.PACKAGE_NAME}}
                   pull-request-title-pattern: 'chore${scope}: release ${version} [skip-ci]'
+                  pull-request-header: ':robot: I have created a release *beep* *boop* (${{vars.PACKAGE_NAME}})'
 
             - uses: actions/checkout@v3
               if: ${{ steps.release.outputs.release_created }}
