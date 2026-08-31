@@ -1,4 +1,8 @@
 
+[log]
+    # trace, debug, info, warn, error, fatal or silent
+    level = "info"
+
 [http]
     port = 8080
 
@@ -68,6 +72,9 @@ wildCardAllowed = false
     error502 = "./errors/502.html"
     
     workers = 2
+
+    # How long to wait before replacing a worker that died, in milliseconds
+    respawnDelay = 2000
 
     # Downgrade user once HTTP/S ports are bound
     #user="www-data"
