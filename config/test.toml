@@ -15,6 +15,9 @@
 [https]
     port = 18443
     host = "127.0.0.1"
+    # short windows, so the cache tests do not have to wait a minute
+    contextCacheTtl = 0.2
+    missingContextTtl = 0.2
 
 [acme]
     key = "test"

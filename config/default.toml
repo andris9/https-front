@@ -14,6 +14,17 @@
     cert = "./setup/https-cert.pem"
     dhParam = "./setup/dhparam.pem"
 
+    # TLS contexts are cached per domain. An entry is served for this many
+    # seconds before it is revalidated against Redis, so a renewal is picked up
+    # within this window.
+    contextCacheTtl = 60
+
+    # Same, for a domain that has no certificate to serve
+    missingContextTtl = 30
+
+    # Upper bound on the number of cached TLS contexts
+    contextCacheSize = 5000
+
     ciphers = "ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384"
     sessionIdContext = "https-front"
 

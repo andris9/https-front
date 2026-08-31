@@ -105,6 +105,11 @@ Renewal happens in the background while the current certificate keeps being
 served. If a renewal fails, a failsafe lock blocks further attempts for an hour
 and the existing certificate stays in use until it expires.
 
+Each worker keeps a bounded cache of TLS contexts so that a handshake does not
+have to read the certificate out of Redis every time. An entry is revalidated
+once `https.contextCacheTtl` seconds have passed, so a renewal reaches every
+instance within that window.
+
 ## Default Certificates
 
 Default certificate files reside in [setup](setup) folder. These are self-signed

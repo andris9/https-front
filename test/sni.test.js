@@ -6,8 +6,10 @@ const fs = require('node:fs');
 const https = require('node:https');
 
 const helpers = require('./helpers');
-const { DAY, certKeyFor, closeDb, config, flushTestDb, redisClient, startAcmeDirectory, tlsConnect } = helpers;
-const { getSNIContext, defaultCtx, httpsCredentials } = require('../lib/sni');
+const { DAY, certKeyFor, closeDb, config, delay, flushTestDb, redisClient, startAcmeDirectory, tlsConnect } = helpers;
+const { getSNIContext, defaultCtx, httpsCredentials, testables } = require('../lib/sni');
+
+const { ctxCache } = testables;
 
 // A real key pair is needed: tls.createSecureContext() parses whatever the SNI
 // handler pulls out of Redis. The bundled default certificate is reused here.
@@ -28,6 +30,10 @@ test.before(async () => {
 test.after(async () => {
     await directory.close();
     await closeDb();
+});
+
+test.beforeEach(() => {
+    ctxCache.clear();
 });
 
 test('httpsCredentials carries the default certificate', () => {
@@ -88,19 +94,113 @@ test('getSNIContext ignores the port in the server name', async () => {
     await redisClient.del(certKey);
 });
 
-test('contexts are cached per domain until the certificate changes', async () => {
+test('a cached context is served without reading Redis again', async t => {
     const certKey = await seedCertificate('cache.example.com', Date.now() + 60 * DAY);
 
     const first = await getSNIContext('cache.example.com');
-    const second = await getSNIContext('cache.example.com');
-    assert.equal(first, second, 'cached context reused');
+    assert.ok(first, 'context created');
 
-    // a renewed certificate has a new expiry, which must invalidate the cache
-    await redisClient.hset(certKey, 'expires', new Date(Date.now() + 90 * DAY).toISOString());
-    const third = await getSNIContext('cache.example.com');
-    assert.notEqual(third, first, 'cache invalidated after renewal');
+    const reads = t.mock.method(redisClient, 'hgetall');
+    const second = await getSNIContext('cache.example.com');
+
+    assert.equal(second, first, 'the cached context was reused');
+    assert.equal(reads.mock.callCount(), 0, 'no Redis lookup on a cache hit');
 
     await redisClient.del(certKey);
+});
+
+test('a renewed certificate is picked up once the check interval has passed', async () => {
+    const certKey = await seedCertificate('renewed-ctx.example.com', Date.now() + 60 * DAY);
+
+    const first = await getSNIContext('renewed-ctx.example.com');
+
+    // a renewal gives the entry a new expiry
+    await redisClient.hset(certKey, 'expires', new Date(Date.now() + 89 * DAY).toISOString());
+
+    // still inside the check interval, so the old context is still served
+    assert.equal(await getSNIContext('renewed-ctx.example.com'), first);
+
+    await delay(config.https.contextCacheTtl * 1000 + 50);
+    const third = await getSNIContext('renewed-ctx.example.com');
+    assert.notEqual(third, first, 'the renewed certificate replaced the context');
+
+    await redisClient.del(certKey);
+});
+
+test('an unchanged certificate keeps its context across a revalidation', async () => {
+    const certKey = await seedCertificate('stable.example.com', Date.now() + 60 * DAY);
+
+    const first = await getSNIContext('stable.example.com');
+    await delay(config.https.contextCacheTtl * 1000 + 50);
+
+    const second = await getSNIContext('stable.example.com');
+    assert.equal(second, first, 'the context survived the revalidation');
+
+    await redisClient.del(certKey);
+});
+
+test('a certificate that expires while cached is not served', async () => {
+    // a long check interval, so only the expiry can invalidate the entry
+    const originalTtl = config.https.contextCacheTtl;
+    config.https.contextCacheTtl = 30;
+
+    const certKey = await seedCertificate('expiring.example.com', Date.now() + 200);
+    try {
+        await getSNIContext('expiring.example.com');
+
+        // the certificate lapses well inside the check interval
+        await delay(250);
+        await redisClient.set(`${certKey}:lock`, '1');
+
+        assert.equal(await getSNIContext('expiring.example.com'), false, 'the expired context was dropped');
+    } finally {
+        config.https.contextCacheTtl = originalTtl;
+        await redisClient.del(certKey, `${certKey}:lock`);
+    }
+});
+
+test('a domain with no certificate is not looked up on every handshake', async t => {
+    const certKey = certKeyFor('missing.example.com');
+    await redisClient.set(`${certKey}:lock`, '1');
+
+    assert.equal(await getSNIContext('missing.example.com'), false);
+
+    const reads = t.mock.method(redisClient, 'hgetall');
+    assert.equal(await getSNIContext('missing.example.com'), false);
+    assert.equal(reads.mock.callCount(), 0, 'the miss was remembered');
+
+    // and it is retried once the shorter miss interval has passed
+    await delay(config.https.missingContextTtl * 1000 + 50);
+    assert.equal(await getSNIContext('missing.example.com'), false);
+    assert.ok(reads.mock.callCount() > 0, 'the lookup was retried');
+
+    await redisClient.del(`${certKey}:lock`);
+});
+
+test('the cache is bounded and evicts the least recently used domain', async () => {
+    const originalSize = config.https.contextCacheSize;
+    config.https.contextCacheSize = 3;
+
+    const certKeys = [];
+    try {
+        for (const name of ['one', 'two', 'three']) {
+            certKeys.push(await seedCertificate(`${name}.example.com`, Date.now() + 60 * DAY));
+            await getSNIContext(`${name}.example.com`);
+        }
+        assert.equal(ctxCache.size, 3);
+
+        // touching the oldest entry makes it the most recently used one
+        await getSNIContext('one.example.com');
+
+        certKeys.push(await seedCertificate('four.example.com', Date.now() + 60 * DAY));
+        await getSNIContext('four.example.com');
+
+        assert.equal(ctxCache.size, 3, 'the cache stayed within its bound');
+        assert.deepEqual([...ctxCache.keys()], ['three.example.com', 'one.example.com', 'four.example.com']);
+    } finally {
+        config.https.contextCacheSize = originalSize;
+        await redisClient.del(...certKeys);
+    }
 });
 
 test('SNICallback falls back to the default context for unknown names', async () => {

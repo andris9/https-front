@@ -12,7 +12,7 @@ instances can share one certificate pool.
 | `server.js`              | Cluster master: forks workers, handles signals, respawns dead workers     |
 | `worker.js`              | Binds the HTTP and HTTPS ports, keeps TLS sessions in Redis               |
 | `lib/app.js`             | Request handler: serves ACME challenges, proxies everything else          |
-| `lib/sni.js`             | SNI callback, per-domain secure contexts, default certificate fallback    |
+| `lib/sni.js`             | SNI callback, the per-domain context cache, default certificate fallback  |
 | `lib/certs.js`           | ACME account and certificate provisioning, domain validation, Redis state |
 | `lib/redis-challenge.js` | `http-01` challenge store used by the ACME client                         |
 | `lib/check-url.js`       | Optional external allow/deny hook consulted before provisioning           |
@@ -36,6 +36,9 @@ instances can share one certificate pool.
 - Certificates are renewed once two thirds of their lifetime has passed, never on
   a fixed number of days left, because Let's Encrypt is shortening certificate
   lifetimes. `renewalTime` in `lib/certs.js` carries the reasoning and the dates.
+- A TLS handshake must not read Redis. `lib/sni.js` keeps a bounded LRU of secure
+  contexts and revalidates an entry only once `https.contextCacheTtl` has passed,
+  which is also what bounds how long a renewal takes to reach a worker.
 
 ## Tests
 
