@@ -3,13 +3,13 @@
 const http = require('http');
 const https = require('https');
 
-const config = require('wild-config');
+const config = require('@zone-eu/wild-config');
 const { httpsCredentials } = require('./lib/sni');
 const { redisClient } = require('./lib/db');
 const { app } = require('./lib/app');
 
-const pino = require('pino')();
-const logger = pino.child({ app: 'https-front', component: 'worker' });
+const { componentLogger } = require('./lib/logger');
+const logger = componentLogger('worker');
 
 const httpServer = http.createServer((req, res) => {
     req.proto = 'http';
@@ -23,10 +23,7 @@ const httpsServer = https.createServer(httpsCredentials, (req, res) => {
 
 httpsServer.on('newSession', (id, data, cb) => {
     redisClient
-        .multi()
-        .set(`tls:${id.toString('hex')}`, data)
-        .expire(`tls:${id.toString('hex')}`, 30 * 60)
-        .exec()
+        .set(`tls:${id.toString('hex')}`, data, 'EX', 30 * 60)
         .then(() => {
             cb();
         })
@@ -38,13 +35,10 @@ httpsServer.on('newSession', (id, data, cb) => {
 
 httpsServer.on('resumeSession', (id, cb) => {
     redisClient
-        .multi()
-        .getBuffer(`tls:${id.toString('hex')}`)
-        // extend ticket
-        .expire(`tls:${id.toString('hex')}`, 300)
-        .exec()
-        .then(result => {
-            cb(null, result?.[0]?.[1] || null);
+        // read the ticket and extend it in one round trip
+        .getexBuffer(`tls:${id.toString('hex')}`, 'EX', 300)
+        .then(session => {
+            cb(null, session || null);
         })
         .catch(err => {
             logger.error({ msg: 'Failed to retrieve TLS ticket', err, id });

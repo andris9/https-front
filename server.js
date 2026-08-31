@@ -3,9 +3,9 @@
 /* eslint global-require: 0 */
 
 const cluster = require('cluster');
-const config = require('wild-config');
-const pino = require('pino')();
-const logger = pino.child({ app: 'https-front', component: 'cluster' });
+const config = require('@zone-eu/wild-config');
+const { componentLogger } = require('./lib/logger');
+const logger = componentLogger('cluster');
 
 let closing = false;
 const closeProcess = code => {
@@ -66,7 +66,10 @@ if (cluster.isMaster) {
             return;
         }
         logger.error({ msg: 'Worker died', worker: worker.process.pid, code, signal });
-        setTimeout(() => fork(), 2000).unref();
+        // Not unref'd on purpose. Once the last worker is gone, cluster releases
+        // the shared listening sockets, so an unref'd timer would let the master
+        // fall out of the event loop and exit instead of forking a replacement.
+        setTimeout(() => fork(), config.proxy.respawnDelay || 2000);
     });
 } else {
     process.title = 'https-front: worker';
