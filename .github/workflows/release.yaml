@@ -19,7 +19,7 @@ jobs:
         steps:
             # Uses release-please-config.json and .release-please-manifest.json
             # from the repository root (manifest mode).
-            - uses: googleapis/release-please-action@v4
+            - uses: googleapis/release-please-action@v5
               id: release
 
     publish_asset:
