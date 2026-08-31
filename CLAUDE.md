@@ -36,9 +36,11 @@ instances can share one certificate pool.
 - Certificates are renewed once two thirds of their lifetime has passed, never on
   a fixed number of days left, because Let's Encrypt is shortening certificate
   lifetimes. `renewalTime` in `lib/certs.js` carries the reasoning and the dates.
-- A TLS handshake must not read Redis. `lib/sni.js` keeps a bounded LRU of secure
-  contexts and revalidates an entry only once `https.contextCacheTtl` has passed,
-  which is also what bounds how long a renewal takes to reach a worker.
+- A TLS handshake must not look a certificate up in Redis. `lib/sni.js` keeps a
+  bounded LRU of secure contexts and revalidates an entry only once
+  `https.contextCacheTtl` has passed, which is also what bounds how long a
+  renewal takes to reach a worker. (Session resumption in `worker.js` does read
+  Redis per handshake, on purpose: that is where the session lives.)
 
 ## Tests
 
