@@ -8,48 +8,55 @@ permissions:
     pull-requests: write
     id-token: write
 
-name: release
+name: Manage Release
 jobs:
     release_please:
-        runs-on: ubuntu-latest
+        name: Create or prepare release
+        runs-on: ubuntu-24.04
+        outputs:
+            release_created: ${{ steps.release.outputs.release_created }}
+            tag_name: ${{ steps.release.outputs.tag_name }}
         steps:
-            - uses: google-github-actions/release-please-action@v3
+            # Uses release-please-config.json and .release-please-manifest.json
+            # from the repository root (manifest mode).
+            - uses: googleapis/release-please-action@v4
               id: release
+
+    publish_asset:
+        name: Attach deployment bundle
+        runs-on: ubuntu-24.04
+        needs: release_please
+        if: ${{ needs.release_please.outputs.release_created }}
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@v6
+
+            - uses: actions/setup-node@v6
               with:
-                  release-type: node
-                  package-name: ${{vars.PACKAGE_NAME}}
-                  pull-request-title-pattern: 'chore${scope}: release ${version} [skip-ci]'
-                  pull-request-header: ':robot: I have created a release *beep* *boop* (${{vars.PACKAGE_NAME}})'
+                  node-version: 24
+                  cache: npm
 
-            - uses: actions/checkout@v3
-              if: ${{ steps.release.outputs.release_created }}
-
-            - uses: actions/setup-node@v3
-              with:
-                  node-version: 20
-                  registry-url: 'https://registry.npmjs.org'
-              if: ${{ steps.release.outputs.release_created }}
-
-            - name: 'Install NPM dependencies'
-              run: npm install --omit=dev
-              if: ${{ steps.release.outputs.release_created }}
-
-            - name: 'Create a release file'
-              run: echo ${{ github.sha }} > Release.txt
-              if: ${{ steps.release.outputs.release_created }}
-
-            - name: 'Compress folder'
-              run: tar --exclude-vcs -czf /tmp/${{ vars.PACKAGE_NAME }}.tar.gz .
-              if: ${{ steps.release.outputs.release_created }}
-
-            - name: 'Upload Release Asset'
-              id: upload-release-asset
-              uses: actions/upload-release-asset@v1
+            - name: Resolve the bundle name
+              id: meta
+              run: echo "name=${PACKAGE_NAME:-$(node -p "require('./package.json').name")}" >> "$GITHUB_OUTPUT"
               env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              with:
-                  upload_url: ${{ steps.release.outputs.upload_url }}
-                  asset_path: /tmp/${{vars.PACKAGE_NAME}}.tar.gz
-                  asset_name: ${{vars.PACKAGE_NAME}}.tar.gz
-                  asset_content_type: application/tar+gzip
-              if: ${{ steps.release.outputs.release_created }}
+                  PACKAGE_NAME: ${{ vars.PACKAGE_NAME }}
+
+            - name: Install production dependencies
+              run: npm ci --omit=dev
+
+            - name: Record the released commit
+              run: echo "${{ github.sha }}" > Release.txt
+
+            - name: Build the deployment bundle
+              run: tar --exclude-vcs --exclude=.github --exclude=test --exclude=coverage -czf "/tmp/${BUNDLE}.tar.gz" .
+              env:
+                  BUNDLE: ${{ steps.meta.outputs.name }}
+
+            - name: Attach the bundle to the release
+              run: gh release upload "$TAG" "/tmp/${BUNDLE}.tar.gz" --clobber
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  TAG: ${{ needs.release_please.outputs.tag_name }}
+                  BUNDLE: ${{ steps.meta.outputs.name }}

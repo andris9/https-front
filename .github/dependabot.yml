@@ -1,0 +1,18 @@
+version: 2
+
+updates:
+    # npm dependencies are refreshed manually with `npm run update`, so Dependabot
+    # only watches the parts of the repository that are easy to forget.
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: monthly
+      commit-message:
+          prefix: 'chore(deps)'
+
+    - package-ecosystem: docker
+      directory: /
+      schedule:
+          interval: monthly
+      commit-message:
+          prefix: 'chore(deps)'
