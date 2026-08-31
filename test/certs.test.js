@@ -9,6 +9,7 @@ const { pem2jwk } = require('pem-jwk');
 const {
     DAY,
     acmeOptions,
+    certKeyFor,
     closeDb,
     config,
     delay,
@@ -324,6 +325,31 @@ test('getCertificate', async t => {
         assert.ok(!cert, 'no usable certificate');
 
         await redisClient.del(certKey, `${certKey}:lock`);
+    });
+
+    await t.test('remembers a validation failure instead of retrying it on every request', async t2 => {
+        const restore = useLocalDomainChecks();
+        const caa = t2.mock.method(resolver, 'resolveCaa', async () => [{ issue: 'digicert.com' }]);
+
+        try {
+            assert.ok(!(await getCertificate(acmeOptions(), 'blocked-caa.example.com')));
+
+            // recorded in Redis, so every worker and instance backs off
+            const certKey = certKeyFor('blocked-caa.example.com');
+            assert.equal(await redisClient.exists(`${certKey}:lock`), 1, 'renewal was blocked');
+
+            const ttl = await redisClient.ttl(`${certKey}:lock`);
+            assert.ok(ttl > 0 && ttl <= 300, `unexpected lock ttl ${ttl}`);
+
+            // and the retry costs no DNS queries while the marker is in place
+            const before = caa.mock.callCount();
+            assert.ok(!(await getCertificate(acmeOptions(), 'blocked-caa.example.com')));
+            assert.equal(caa.mock.callCount(), before, 'validation was not repeated');
+
+            await redisClient.del(`${certKey}:lock`);
+        } finally {
+            restore();
+        }
     });
 
     await t.test('gives up on a domain that fails validation', async t2 => {
