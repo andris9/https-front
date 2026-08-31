@@ -1,0 +1,42 @@
+# Configuration used by the automated test suite (NODE_ENV=test).
+#
+# It is never loaded in production or development, and it keeps the tests
+# isolated from real data by pointing Redis at a dedicated database that the
+# test setup is free to flush.
+
+[log]
+    # the suite asserts on behaviour, not on log output
+    level = "silent"
+
+[http]
+    port = 18080
+    host = "127.0.0.1"
+
+[https]
+    port = 18443
+    host = "127.0.0.1"
+
+[acme]
+    key = "test"
+    email = "test@example.com"
+    # Unreachable on purpose. Tests that need an ACME directory start a local
+    # stub server and point this at it.
+    directoryUrl = "http://127.0.0.1:1/directory"
+
+[proxy]
+    # Overridden by the individual tests that start their own origin server.
+    origin = "http://127.0.0.1:1/"
+    workers = 1
+    # keep the worker respawn test quick
+    respawnDelay = 50
+
+[redis]
+    host = "127.0.0.1"
+    port = 6379
+    # Dedicated Redis database for tests. The test helpers flush this DB, so it
+    # must not be shared with development (db 4) or production data.
+    db = 15
+    # Fail fast instead of retrying forever when Redis is not running, so a
+    # missing test dependency shows up as an error rather than as a hang.
+    connectTimeout = 2000
+    maxRetriesPerRequest = 2
