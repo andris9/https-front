@@ -1,3 +1,19 @@
 .DS_Store
 node_modules
-package-lock.json
+
+# test coverage output
+coverage
+*.lcov
+.nyc_output
+
+# local runtime config overrides
+config/local.toml
+config/production.toml
+
+# logs and diagnostics
+*.log
+npm-debug.log*
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# npm pack output
+*.tgz

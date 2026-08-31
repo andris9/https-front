@@ -1,6 +1,16 @@
-FROM node:16-alpine
+FROM node:24-alpine
+
+ENV NODE_ENV=production
+
 WORKDIR /app
+
+# Install dependencies first so the layer is cached while only sources change.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
 COPY . .
-RUN npm ci --only=production
+
 EXPOSE 80 443
-ENTRYPOINT npm run start
+
+# Exec form, so the Node process is PID 1 and receives SIGTERM/SIGINT directly.
+CMD ["node", "server.js"]

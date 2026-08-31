@@ -1,4 +1,9 @@
 .git*
+.github
 node_modules
+coverage
+test
 Dockerfile
+.dockerignore
 .vscode
+*.log
