@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/andris9/https-front/compare/v1.4.0...v1.4.1) (2026-09-01)
+
+
+### Miscellaneous Chores
+
+* release 1.4.1 ([4cd2694](https://github.com/andris9/https-front/commit/4cd2694280ebb383c04bcf912deabc00449e89b4))
+
 ## [1.4.0](https://github.com/andris9/https-front/compare/v1.3.2...v1.4.0) (2026-08-31)
 
 

@@ -1,6 +1,6 @@
 {
     "name": "https-front",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "description": "Simple HTTPS proxy for single origin",
     "main": "server.js",
     "engines": {
