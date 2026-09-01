@@ -2,72 +2,17 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
-const path = require('node:path');
 
-const { closeDb, config, flushTestDb, isPortFree, redisClient, request, startServer, tlsConnect, waitFor } = require('./helpers');
+const { closeDb, config, flushTestDb, isPortFree, redisClient, request, startApplication, startServer, tlsConnect, waitFor } = require('./helpers');
 
-const ROOT = path.join(__dirname, '..');
 const HTTP_PORT = config.http.port;
 const HTTPS_PORT = config.https.port;
 
 const waitForFreePort = port => waitFor(() => isPortFree(port), { timeout: 10000 });
 
-// Boots the real entry point, the same way the Dockerfile does, and resolves
-// once a worker reports that it is listening. The application is stopped and its
-// ports released when the test that started it ends.
-const startApplication = (t, env) =>
-    new Promise((resolve, reject) => {
-        const child = spawn(process.execPath, ['server.js'], {
-            cwd: ROOT,
-            // the child needs real logs: the assertions read its output
-            env: Object.assign({}, process.env, { NODE_ENV: 'test', appconf_log_level: 'info' }, env),
-            stdio: ['ignore', 'pipe', 'pipe']
-        });
-
-        t.after(async () => {
-            if (child.exitCode === null) {
-                child.kill('SIGKILL');
-            }
-            await waitForFreePort(HTTP_PORT);
-            await waitForFreePort(HTTPS_PORT);
-        });
-
-        let output = '';
-        const timer = setTimeout(() => {
-            child.kill('SIGKILL');
-            reject(new Error(`Server did not start in time. Output:\n${output}`));
-        }, 20000);
-
-        let started = false;
-        const onData = chunk => {
-            output += chunk.toString();
-            if (!started && /Server started/.test(output)) {
-                started = true;
-                clearTimeout(timer);
-                resolve({
-                    child,
-                    output: () => output,
-                    // 'close' rather than 'exit', so the last log lines are read
-                    // before the result is inspected
-                    stop: signal =>
-                        new Promise(done => {
-                            child.once('close', (code, sig) => done({ code, signal: sig }));
-                            child.kill(signal || 'SIGTERM');
-                        })
-                });
-            }
-        };
-
-        child.stdout.on('data', onData);
-        child.stderr.on('data', chunk => (output += chunk.toString()));
-        child.once('error', err => {
-            clearTimeout(timer);
-            reject(err);
-        });
-    });
-
 let origin;
+
+const boot = t => startApplication(t, { env: { appconf_proxy_origin: `${origin.url}/` } });
 
 test.before(async () => {
     await flushTestDb();
@@ -85,7 +30,7 @@ test.after(async () => {
 test('the cluster boots, serves both protocols and shuts down on SIGTERM', async t => {
     assert.ok(await isPortFree(HTTP_PORT), `port ${HTTP_PORT} must be free before the test`);
 
-    const app = await startApplication(t, { appconf_proxy_origin: `${origin.url}/` });
+    const app = await boot(t);
 
     assert.match(app.output(), /Master process started/);
     assert.match(app.output(), /Worker came online/);
@@ -99,6 +44,11 @@ test('the cluster boots, serves both protocols and shuts down on SIGTERM', async
     const handshake = await tlsConnect({ port: HTTPS_PORT, servername: 'boot.example.com' }, socket => socket.getPeerCertificate());
     assert.match(handshake.subject.CN, /https-front/);
 
+    // and HTTPS serves the same proxied response, on the default certificate
+    const secure = await request(`https://127.0.0.1:${HTTPS_PORT}/`, { servername: 'boot.example.com', headers: { host: 'boot.example.com' } });
+    assert.equal(secure.status, 200);
+    assert.equal(secure.body, 'origin reached');
+
     const exit = await app.stop('SIGTERM');
     assert.equal(exit.code, 0);
     assert.match(app.output(), /Received SIGTERM/);
@@ -108,7 +58,7 @@ test('the cluster boots, serves both protocols and shuts down on SIGTERM', async
 });
 
 test('SIGINT shuts the cluster down just as cleanly', async t => {
-    const app = await startApplication(t, { appconf_proxy_origin: `${origin.url}/` });
+    const app = await boot(t);
 
     const exit = await app.stop('SIGINT');
     assert.equal(exit.code, 0);
@@ -117,7 +67,7 @@ test('SIGINT shuts the cluster down just as cleanly', async t => {
 });
 
 test('a worker that dies is replaced', async t => {
-    const app = await startApplication(t, { appconf_proxy_origin: `${origin.url}/` });
+    const app = await boot(t);
 
     const workerPid = Number(app.output().match(/"worker":(\d+)/)[1]);
     process.kill(workerPid, 'SIGKILL');
@@ -139,7 +89,7 @@ test('a worker that dies is replaced', async t => {
 });
 
 test('TLS sessions are stored in Redis so they can be resumed by any worker', async t => {
-    await startApplication(t, { appconf_proxy_origin: `${origin.url}/` });
+    await boot(t);
 
     // TLSv1.2 is requested explicitly: session ID based resumption is what the
     // newSession/resumeSession handlers in worker.js implement.

@@ -83,6 +83,19 @@ test('an unknown challenge token returns 404', async () => {
     assert.equal(res.body, 'Failed to verify authorization token');
 });
 
+test('an unexpected lookup failure returns 500 rather than 404', async t => {
+    t.mock.method(redisClient, 'get', async () => {
+        throw new Error('redis is unhappy');
+    });
+
+    const res = await request(`${front.url}${ACME_PREFIX}token-x`, {
+        headers: { host: 'acme.example.com' }
+    });
+
+    assert.equal(res.status, 500);
+    assert.equal(res.body, 'Failed to verify authorization token');
+});
+
 test('proxies everything else to the configured origin', async () => {
     const res = await request(`${front.url}/some/path?with=query`, {
         headers: { host: 'www.example.com' }

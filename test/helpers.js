@@ -4,7 +4,10 @@
 // config/test.toml points Redis at the dedicated test database (db 15), the
 // servers at loopback ports and the logger at "silent".
 
+const { spawn } = require('node:child_process');
 const http = require('node:http');
+const https = require('node:https');
+const path = require('node:path');
 const tls = require('node:tls');
 
 if (!process.env.NODE_ENV) {
@@ -17,7 +20,11 @@ const { certificateKey } = require('../lib/certs').testables;
 
 const DAY = 24 * 3600 * 1000;
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const delay = ms =>
+    new Promise(resolve => {
+        // unref'd, so a pending delay never keeps the test process alive
+        setTimeout(resolve, ms).unref();
+    });
 
 // Poll `check` until it returns something truthy, or give up. Returns the last
 // value, so a caller can assert on it either way.
@@ -52,13 +59,14 @@ const closeDb = async () => {
     await redisClient.quit().catch(() => false);
 };
 
-// Start an HTTP server on a random loopback port. Returns the server, its port
-// and its base URL, plus a close() that resolves once the port is free again.
-const startServer = handler =>
+// Start an HTTP server on a loopback port, random unless one is given. Returns
+// the server, its port and its base URL, plus a close() that resolves once the
+// port is free again. Passing a port and no handler makes it a port blocker.
+const startServer = (handler, port = 0) =>
     new Promise((resolve, reject) => {
         const server = http.createServer(handler);
         server.once('error', reject);
-        server.listen(0, '127.0.0.1', () => {
+        server.listen(port, '127.0.0.1', () => {
             const { port } = server.address();
             resolve({
                 server,
@@ -179,10 +187,14 @@ const useLocalDomainChecks = () => {
 // pool is left behind when a test finishes.
 const request = (url, opts = {}) =>
     new Promise((resolve, reject) => {
-        const req = http.request(
+        const transport = url.startsWith('https:') ? https : http;
+        const req = transport.request(
             url,
             {
                 method: opts.method || 'GET',
+                // the default certificate is self signed, and no test verifies it
+                rejectUnauthorized: false,
+                servername: opts.servername,
                 headers: Object.assign({ connection: 'close' }, opts.headers)
             },
             res => {
@@ -220,6 +232,106 @@ const isPortFree = port =>
         probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)));
     });
 
+// The application logs newline delimited JSON, so assertions read records
+// rather than matching text across an ever growing buffer.
+const logRecords = output =>
+    output
+        .split('\n')
+        .filter(Boolean)
+        .flatMap(line => {
+            try {
+                return [JSON.parse(line)];
+            } catch {
+                // ioredis and Node warnings share the stream and are not JSON
+                return [];
+            }
+        });
+
+// Boots the real entry point the way the Dockerfile does. Resolves once the
+// child logs something matching `ready`, which is "Server started" for a healthy
+// boot and a failure message for the tests that exercise a broken one. The child
+// is stopped and its ports released when the test that started it ends.
+const startApplication = async (t, { env = {}, ready = /Server started/ } = {}) => {
+    const child = spawn(process.execPath, ['server.js'], {
+        cwd: path.join(__dirname, '..'),
+        // the child needs real logs: the assertions read its output
+        env: Object.assign({}, process.env, { NODE_ENV: 'test', appconf_log_level: 'info' }, env),
+        stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    let output = '';
+    let failure = null;
+    const waiters = new Set();
+
+    const settle = () => {
+        for (const waiter of [...waiters]) {
+            if (failure) {
+                waiters.delete(waiter);
+                clearTimeout(waiter.timer);
+                waiter.reject(failure);
+            } else if (waiter.pattern.test(output)) {
+                waiters.delete(waiter);
+                clearTimeout(waiter.timer);
+                waiter.resolve(output);
+            }
+        }
+    };
+
+    const onData = chunk => {
+        output += chunk.toString();
+        settle();
+    };
+
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    child.once('error', err => {
+        failure = err;
+        settle();
+    });
+
+    // Resolves once the child has logged something matching `pattern`, off the
+    // stream itself rather than by polling the accumulated output.
+    const waitForLog = (pattern, { timeout = 10000 } = {}) =>
+        new Promise((resolve, reject) => {
+            if (failure) {
+                return reject(failure);
+            }
+            if (pattern.test(output)) {
+                return resolve(output);
+            }
+            const waiter = { pattern, resolve, reject };
+            waiter.timer = setTimeout(() => {
+                waiters.delete(waiter);
+                reject(new Error(`Timed out waiting for ${pattern}. Output:\n${output}`));
+            }, timeout);
+            waiters.add(waiter);
+        });
+
+    const stop = signal =>
+        new Promise(done => {
+            if (child.exitCode !== null) {
+                return done({ code: child.exitCode });
+            }
+            // 'close' rather than 'exit', so the last log lines are read before
+            // the result is inspected
+            child.once('close', (code, sig) => done({ code, signal: sig }));
+            child.kill(signal || 'SIGTERM');
+        });
+
+    t.after(async () => {
+        // SIGTERM first: the child writes its coverage profile on a clean exit
+        child.kill('SIGTERM');
+        await waitFor(() => child.exitCode !== null, { timeout: 2000 });
+        await stop('SIGKILL');
+        await waitFor(() => isPortFree(config.http.port), { timeout: 10000 });
+        await waitFor(() => isPortFree(config.https.port), { timeout: 10000 });
+    });
+
+    await waitForLog(ready, { timeout: 20000 });
+
+    return { child, output: () => output, records: () => logRecords(output), stop, waitForLog };
+};
+
 module.exports = {
     DAY,
     acmeOptions,
@@ -229,10 +341,12 @@ module.exports = {
     delay,
     flushTestDb,
     isPortFree,
+    logRecords,
     redisClient,
     request,
     seedCertificate,
     startAcmeDirectory,
+    startApplication,
     startRecordingServer,
     startServer,
     tlsConnect,

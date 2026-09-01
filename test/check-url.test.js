@@ -81,11 +81,31 @@ test('POST requests can send form encoded data', async () => {
     assert.equal(new URLSearchParams(req.body).get('domain'), 'example.com');
 });
 
-test('unknown methods fall back to GET', async () => {
-    config.checkUrl.method = 'options';
+test('no expectations at all means any successful response passes', async () => {
+    delete config.checkUrl.expect;
+    endpoint.respondWith({ status: 204, body: '' });
 
     assert.equal(await checkUrl('example.com'), true);
-    assert.equal(endpoint.received[0].method, 'GET');
+});
+
+test('a text match against a JSON body is reported as a miss', async () => {
+    config.checkUrl.expect = { textMatch: 'allowed' };
+    endpoint.respondWith({ body: '{"verdict":"allowed"}', contentType: 'application/json' });
+
+    // axios parsed the body into an object, so there is no text to search
+    await assert.rejects(() => checkUrl('example.com'), /Did not find expected text "allowed"/);
+});
+
+test('anything but POST falls back to GET', async t => {
+    for (const method of [undefined, 'options']) {
+        await t.test(`method ${method === undefined ? 'unset' : method}`, async () => {
+            endpoint.received.length = 0;
+            config.checkUrl.method = method;
+
+            assert.equal(await checkUrl('example.com'), true);
+            assert.equal(endpoint.received[0].method, 'GET');
+        });
+    }
 });
 
 test('an allowed status code passes', async () => {
