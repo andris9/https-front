@@ -2,116 +2,55 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
-
-const { pem2jwk } = require('pem-jwk');
 
 const {
     DAY,
-    acmeOptions,
-    certKeyFor,
+    blockKey,
     closeDb,
     config,
     delay,
     flushTestDb,
     redisClient,
     seedCertificate,
-    startAcmeDirectory,
     startRecordingServer,
+    stubAcme,
     useLocalDomainChecks
 } = require('./helpers');
 const { getCertificate, testables } = require('../lib/certs');
 
-const { generateKey, formatCertificateData, validateDomain, resolver } = testables;
+const { isUsable, validateDomain, resolver } = testables;
 
 // No test in this file orders an actual certificate.
-let directory;
 let restoreDomainChecks;
 
 test.before(async () => {
     await flushTestDb();
-    directory = await startAcmeDirectory();
 });
 
 test.after(async () => {
-    await directory.close();
     await closeDb();
 });
 
-// Runs first on purpose: the ACME directory is fetched once per process, so this
-// is the only chance to observe the initialization itself.
-test('concurrent lookups initialize the ACME client only once', async () => {
-    const certKey = await seedCertificate('init.example.com', { expires: Date.now() + 60 * DAY });
+test('isUsable', async t => {
+    const stored = (expires, extra = {}) => Object.assign({ cert: 'stored-cert', privateKey: 'stored-private-key', validTo: new Date(expires) }, extra);
 
-    const before = directory.requestCount();
-    await Promise.all([
-        getCertificate(acmeOptions(), 'init.example.com'),
-        getCertificate(acmeOptions(), 'init.example.com'),
-        getCertificate(acmeOptions(), 'init.example.com')
-    ]);
-
-    assert.equal(directory.requestCount() - before, 1);
-    await redisClient.del(certKey);
-});
-
-test('generateKey', async t => {
-    await t.test('returns a PKCS#1 RSA private key PEM', async () => {
-        const pem = await generateKey(2048);
-        assert.match(pem, /^-----BEGIN RSA PRIVATE KEY-----/);
-        assert.match(pem, /-----END RSA PRIVATE KEY-----\s*$/);
-
-        const keyObject = crypto.createPrivateKey(pem);
-        assert.equal(keyObject.asymmetricKeyType, 'rsa');
-        assert.equal(keyObject.asymmetricKeyDetails.modulusLength, 2048);
+    await t.test('accepts a certificate that has not expired', () => {
+        assert.equal(isUsable(stored(Date.now() + DAY)), true);
     });
 
-    await t.test('defaults to a 2048 bit key', async () => {
-        const keyObject = crypto.createPrivateKey(await generateKey());
-        assert.equal(keyObject.asymmetricKeyDetails.modulusLength, 2048);
+    await t.test('rejects an expired certificate', () => {
+        assert.equal(isUsable(stored(Date.now() - DAY)), false);
     });
 
-    await t.test('converts to a JWK via pem-jwk, as the ACME flow needs', async () => {
-        const jwk = pem2jwk(await generateKey(2048));
-        assert.equal(jwk.kty, 'RSA');
-        assert.ok(jwk.n, 'modulus present');
-        assert.ok(jwk.d, 'private exponent present');
-    });
-});
-
-test('formatCertificateData', async t => {
-    await t.test('returns false for missing data', () => {
-        assert.equal(formatCertificateData(null), false);
-        assert.equal(formatCertificateData(undefined), false);
-        assert.equal(formatCertificateData(''), false);
-    });
-
-    await t.test('parses the stored date strings', () => {
-        const formatted = formatCertificateData({
-            validFrom: '2023-01-01T00:00:00.000Z',
-            expires: '2023-04-01T00:00:00.000Z',
-            lastCheck: '2023-02-01T00:00:00.000Z',
-            created: '2023-01-01T00:00:00.000Z'
-        });
-
-        for (const key of ['validFrom', 'expires', 'lastCheck', 'created']) {
-            assert.ok(formatted[key] instanceof Date, `${key} is a Date`);
-        }
-        assert.equal(formatted.expires.toISOString(), '2023-04-01T00:00:00.000Z');
-    });
-
-    await t.test('parses the dnsNames JSON list', () => {
-        const formatted = formatCertificateData({ dnsNames: '["example.com","www.example.com"]' });
-        assert.deepEqual(formatted.dnsNames, ['example.com', 'www.example.com']);
-    });
-
-    await t.test('marks unparseable dnsNames as false', () => {
-        assert.equal(formatCertificateData({ dnsNames: 'not json' }).dnsNames, false);
-    });
-
-    await t.test('leaves other values untouched', () => {
-        const formatted = formatCertificateData({ cert: 'pem', issuer: 'Test CA' });
-        assert.equal(formatted.cert, 'pem');
-        assert.equal(formatted.issuer, 'Test CA');
+    await t.test('rejects a record that can not be served', () => {
+        // a record with a key but no certificate is what an order that has not
+        // finished yet looks like
+        assert.equal(isUsable({ privateKey: 'stored-private-key', validTo: new Date(Date.now() + DAY) }), false);
+        assert.equal(isUsable({ cert: 'stored-cert', validTo: new Date(Date.now() + DAY) }), false);
+        assert.equal(isUsable(stored('not a date')), false);
+        assert.equal(isUsable({ cert: 'stored-cert', privateKey: 'stored-private-key' }), false);
+        assert.equal(isUsable(false), false);
+        assert.equal(isUsable(null), false);
     });
 });
 
@@ -276,92 +215,97 @@ test('validateDomain', async t => {
 });
 
 test('getCertificate', async t => {
-    await t.test('returns a stored certificate that is not due for renewal', async () => {
-        const certKey = await seedCertificate('cached.example.com', { expires: Date.now() + 60 * DAY });
+    t.beforeEach(async () => {
+        await flushTestDb();
+        restoreDomainChecks = useLocalDomainChecks();
+    });
 
-        const cert = await getCertificate(acmeOptions(), 'cached.example.com');
+    t.afterEach(() => restoreDomainChecks());
+
+    await t.test('returns a stored certificate that is not due for renewal', async () => {
+        await seedCertificate('cached.example.com', { expires: Date.now() + 60 * DAY });
+
+        const cert = await getCertificate('cached.example.com');
 
         assert.equal(cert.cert, 'stored-cert');
-        assert.equal(cert.chain, 'stored-chain');
-        assert.ok(cert.expires instanceof Date);
-        assert.deepEqual(cert.dnsNames, ['cached.example.com']);
-
-        await redisClient.del(certKey);
+        assert.equal(cert.privateKey, 'stored-private-key');
+        assert.deepEqual(cert.ca, ['stored-chain']);
+        assert.ok(cert.validTo instanceof Date);
+        assert.deepEqual(cert.altNames, ['cached.example.com']);
     });
 
     await t.test('normalizes the requested domain name', async () => {
-        const certKey = await seedCertificate('unicode.example.com', { expires: Date.now() + 60 * DAY });
+        await seedCertificate('unicode.example.com', { expires: Date.now() + 60 * DAY });
 
-        const cert = await getCertificate(acmeOptions(), '  Unicode.Example.COM ');
+        const cert = await getCertificate('  Unicode.Example.COM ');
         assert.equal(cert.cert, 'stored-cert');
-
-        await redisClient.del(certKey);
     });
 
-    await t.test('serves a certificate that is close to expiry and renews in the background', async () => {
-        const certKey = await seedCertificate('renew.example.com', { expires: Date.now() + 10 * DAY });
-        // The failsafe lock makes the background renewal a no-op, so the test
-        // never reaches out to the ACME directory.
-        await redisClient.set(`${certKey}:lock`, '1');
+    await t.test('serves a certificate that is close to expiry and renews in the background', async t2 => {
+        const order = stubAcme(t2).createCertificate;
+        await seedCertificate('renew.example.com', { expires: Date.now() + 10 * DAY });
+        // A recent failure makes the background renewal a no-op, so the test
+        // never reaches out to a certificate authority.
+        await redisClient.set(blockKey('renew.example.com'), '1');
 
-        const cert = await getCertificate(acmeOptions(), 'renew.example.com');
+        const cert = await getCertificate('renew.example.com');
         assert.equal(cert.cert, 'stored-cert');
 
         // give the detached renewal a chance to run
         await delay(25);
-        assert.equal(await redisClient.hget(certKey, 'cert'), 'stored-cert');
-
-        await redisClient.del(certKey, `${certKey}:lock`);
+        assert.equal(order.mock.callCount(), 0, 'the back-off blocked the order');
     });
 
-    await t.test('serves no certificate for an expired entry while the failsafe lock is set', async () => {
-        const certKey = await seedCertificate('expired.example.com', { expires: Date.now() - DAY });
-        await redisClient.set(`${certKey}:lock`, '1');
+    await t.test('serves no certificate for an expired entry while renewal is blocked', async () => {
+        await seedCertificate('expired.example.com', { expires: Date.now() - DAY });
+        await redisClient.set(blockKey('expired.example.com'), '1');
 
-        // The failsafe lock blocks renewal for an hour after a failure. The stored
-        // certificate has already expired, so nothing usable is returned and the
-        // SNI handler falls back to the default certificate.
-        const cert = await getCertificate(acmeOptions(), 'expired.example.com');
+        // Renewal is blocked after a recent failure. The stored certificate has
+        // already expired, so nothing usable is returned and the SNI handler
+        // falls back to the default certificate.
+        const cert = await getCertificate('expired.example.com');
         assert.ok(!cert, 'no usable certificate');
-
-        await redisClient.del(certKey, `${certKey}:lock`);
     });
 
     await t.test('remembers a validation failure instead of retrying it on every request', async t2 => {
-        const restore = useLocalDomainChecks();
-        const caa = t2.mock.method(resolver, 'resolveCaa', async () => [{ issue: 'digicert.com' }]);
+        const caa = stubAcme(t2, { caa: async () => [{ issue: 'digicert.com' }] }).resolveCaa;
 
-        try {
-            assert.ok(!(await getCertificate(acmeOptions(), 'blocked-caa.example.com')));
+        assert.ok(!(await getCertificate('blocked-caa.example.com')));
 
-            // recorded in Redis, so every worker and instance backs off
-            const certKey = certKeyFor('blocked-caa.example.com');
-            assert.equal(await redisClient.exists(`${certKey}:lock`), 1, 'renewal was blocked');
+        // recorded in Redis, so every worker and instance backs off
+        assert.equal(await redisClient.exists(blockKey('blocked-caa.example.com')), 1, 'renewal was blocked');
 
-            const ttl = await redisClient.ttl(`${certKey}:lock`);
-            assert.ok(ttl > 0 && ttl <= 300, `unexpected lock ttl ${ttl}`);
+        const ttl = await redisClient.ttl(blockKey('blocked-caa.example.com'));
+        assert.ok(ttl > 0 && ttl <= 300, `unexpected block ttl ${ttl}`);
 
-            // and the retry costs no DNS queries while the marker is in place
-            const before = caa.mock.callCount();
-            assert.ok(!(await getCertificate(acmeOptions(), 'blocked-caa.example.com')));
-            assert.equal(caa.mock.callCount(), before, 'validation was not repeated');
+        // and the retry costs no DNS queries while the marker is in place
+        const before = caa.mock.callCount();
+        assert.ok(!(await getCertificate('blocked-caa.example.com')));
+        assert.equal(caa.mock.callCount(), before, 'validation was not repeated');
+    });
 
-            await redisClient.del(`${certKey}:lock`);
-        } finally {
-            restore();
-        }
+    await t.test('does not revalidate a domain whose last attempt failed', async t2 => {
+        const { resolveCaa, createCertificate } = stubAcme(t2);
+        await redisClient.set(blockKey('order-failed.example.com'), '1');
+
+        assert.ok(!(await getCertificate('order-failed.example.com')));
+        assert.equal(resolveCaa.mock.callCount(), 0, 'the back-off was checked before the DNS queries');
+        assert.equal(createCertificate.mock.callCount(), 0, 'and before anything was ordered');
     });
 
     await t.test('gives up on a domain that fails validation', async t2 => {
-        const restore = useLocalDomainChecks();
-        t2.mock.method(resolver, 'resolveCaa', async () => [{ issue: 'digicert.com' }]);
+        stubAcme(t2, { caa: async () => [{ issue: 'digicert.com' }] });
 
-        try {
-            // no stored data, and validation fails, so there is nothing to serve
-            const cert = await getCertificate(acmeOptions(), 'invalid-caa.example.com');
-            assert.ok(!cert, 'no certificate for a domain that fails validation');
-        } finally {
-            restore();
-        }
+        // no stored data, and validation fails, so there is nothing to serve
+        const cert = await getCertificate('invalid-caa.example.com');
+        assert.ok(!cert, 'no certificate for a domain that fails validation');
+    });
+
+    await t.test('refuses a name that can not hold a certificate without touching Redis', async t2 => {
+        const reads = t2.mock.method(redisClient, 'hmgetBuffer');
+
+        assert.equal(await getCertificate('not a domain'), false);
+        assert.equal(await getCertificate('localhost'), false);
+        assert.equal(reads.mock.callCount(), 0);
     });
 });

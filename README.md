@@ -9,8 +9,11 @@ Main use case - you want to expose the same origin via unknown amount of domain 
 - All requests, no matter the domain name, are proxied to a single configured origin
 - HTTPS certificates get generated on first request
 - Certificates are renewed for active domain names only, once two thirds of the
-  certificate lifetime has passed, so the shorter certificates Let's Encrypt is
-  moving to are handled without a configuration change
+  certificate lifetime has passed, or earlier when the CA asks for it, so the
+  shorter certificates Let's Encrypt is moving to are handled without a
+  configuration change
+- Certificates are issued against P-256 keys, which every browser supports and
+  which makes for a cheaper handshake than RSA
 - All data is stored in Redis, so you can run several instances in different servers that all share the same certificate pool
 - TLS sessions are shared through Redis as well, so a resumed session can land on any instance
 
@@ -90,25 +93,39 @@ updates the changelog and attaches a deployable `https-front.tar.gz` bundle to i
 
 ## Certificate Renewal
 
-Certificates are renewed once two thirds of their lifetime has passed, which is
-the timing Let's Encrypt recommends for clients that do not implement ARI. The
-window follows each certificate instead of being a fixed number of days, because
-Let's Encrypt is shortening certificate lifetimes: 90 days today, 64 days from
+Certificates come from [@postalsys/certs](https://github.com/postalsys/certs),
+which speaks ACME (RFC 8555) over `http-01` challenges and keeps every
+certificate, private key and ACME account in Redis.
+
+Certificates are renewed once two thirds of their lifetime has passed. The window
+follows each certificate instead of being a fixed number of days, because Let's
+Encrypt is shortening certificate lifetimes: 90 days today, 64 days from
 2027-02-10 and 45 days from 2028-02-16, with the opt-in `tlsserver` profile
 already issuing 45 day certificates. A fixed "renew with 30 days left" rule would
 ask for a renewal a third of the way into a 45 day certificate, on every request.
 
 In practice that means a 90 day certificate is renewed with 30 days left, a 64 day
-one with about 21 days left and a 45 day one with 15 days left.
+one with about 21 days left and a 45 day one with 15 days left. Where the CA
+offers renewal information (RFC 9773), that is asked first and decides instead,
+which is how an early renewal after a revocation reaches the proxy.
 
 Renewal happens in the background while the current certificate keeps being
-served. If a renewal fails, a failsafe lock blocks further attempts for an hour
-and the existing certificate stays in use until it expires.
+served. A failed attempt, whether the domain stopped validating or the order
+itself did not go through, blocks further attempts for a few minutes, and the
+existing certificate stays in use until it expires.
 
 Each worker keeps a bounded cache of TLS contexts so that a handshake does not
 have to read the certificate out of Redis every time. An entry is revalidated
 once `https.contextCacheTtl` seconds have passed, so a renewal reaches every
 instance within that window.
+
+## Upgrading From 1.4.x
+
+Releases up to 1.4.1 kept certificates in a Redis layout of their own. Nothing
+has to be migrated by hand: the ACME account is carried over before the first
+order, and a certificate the first time its domain is looked up, so an upgraded
+instance keeps serving what it already holds instead of re-ordering it. The old
+entries are left where they are and expire on their own.
 
 ## Default Certificates
 

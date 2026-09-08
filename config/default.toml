@@ -24,7 +24,9 @@
 
 # ACME staging settings
 [acme]
-    key = "test" # identifier for Redis keys
+    # Names the certificate pool in Redis, which lives under "acme:<key>:certs:*".
+    # Changing it starts an empty pool with an ACME account of its own.
+    key = "test"
     directoryUrl = "https://acme-staging-v02.api.letsencrypt.org/directory"
     email = "domainadmin@example.com"
 

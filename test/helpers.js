@@ -5,6 +5,7 @@
 // servers at loopback ports and the logger at "silent".
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
 const path = require('node:path');
@@ -16,7 +17,13 @@ if (!process.env.NODE_ENV) {
 
 const config = require('@zone-eu/wild-config');
 const { redisClient } = require('../lib/db');
-const { certificateKey } = require('../lib/certs').testables;
+const { testables } = require('../lib/certs');
+const legacy = require('../lib/legacy-certs').testables;
+
+// The certificate store lib/certs.js works through. Built on first use, so this
+// is a function rather than a value: a test file that never asks for a
+// certificate never opens the connection the store keeps for its renewal lock.
+const certs = () => testables.getCerts();
 
 const DAY = 24 * 3600 * 1000;
 
@@ -110,62 +117,114 @@ const startRecordingServer = async (initialReply = {}) => {
     });
 };
 
-// A stub ACME directory, enough for acme.init() to succeed without reaching out
-// to Let's Encrypt. Points config.acme.directoryUrl at itself and restores it on
-// close. requestCount() reports how often the directory was fetched.
-const startAcmeDirectory = async () => {
-    const originalDirectoryUrl = config.acme.directoryUrl;
-    const state = { requests: 0 };
+// The bundled self signed certificate, which stands in for everything an order
+// would come back with. A real certificate is needed: it is parsed on the way
+// into the store, and tls.createSecureContext() parses it again in sni.js.
+const signedCert = fs.readFileSync(config.https.cert, 'utf-8');
+const signedKey = fs.readFileSync(config.https.key, 'utf-8');
+const chainCert = '-----BEGIN CERTIFICATE-----\nchain\n-----END CERTIFICATE-----';
 
-    const handle = await startServer((req, res) => {
-        state.requests++;
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(
-            JSON.stringify({
-                keyChange: `${handle.url}/acme/key-change`,
-                meta: { termsOfService: `${handle.url}/terms` },
-                newAccount: `${handle.url}/acme/new-acct`,
-                newNonce: `${handle.url}/acme/new-nonce`,
-                newOrder: `${handle.url}/acme/new-order`,
-                revokeCert: `${handle.url}/acme/revoke-cert`
-            })
-        );
-    });
+// What a successful order answers with.
+const issueCertificate = async () => ({ cert: signedCert, chain: [chainCert] });
 
-    config.acme.directoryUrl = `${handle.url}/directory`;
+// Replaces the exchanges with the certificate authority, and the CAA lookup in
+// front of them, with local answers. No test in the suite is allowed to reach
+// either, which is also why the renewal information the store would otherwise
+// ask for is answered here rather than left to fail.
+const ACCOUNT_KID = 'https://acme.example.test/acme/acct/4711';
 
-    const close = handle.close;
-    return Object.assign(handle, {
-        requestCount: () => state.requests,
-        close: async () => {
-            config.acme.directoryUrl = originalDirectoryUrl;
-            await close();
-        }
-    });
+const stubAcme = (t, { order, caa } = {}) => {
+    const acme = certs().acme;
+
+    return {
+        resolveCaa: t.mock.method(testables.resolver, 'resolveCaa', caa || (async () => [])),
+
+        createAccount: t.mock.method(acme, 'createAccount', async () => ({ kid: ACCOUNT_KID, account: { status: 'valid', key: { kid: ACCOUNT_KID } } })),
+
+        createCertificate: t.mock.method(
+            acme,
+            'createCertificate',
+            order ||
+                (async () => {
+                    throw new Error('no certificate order was expected');
+                })
+        ),
+
+        getRenewalInfo: t.mock.method(acme, 'getRenewalInfo', async () => {
+            throw new Error('no renewal information');
+        })
+    };
 };
 
-// The options object every lib/certs.js entry point takes.
-const acmeOptions = () => ({ redisClient, acme: config.acme });
-
-// The Redis key lib/certs.js stores a certificate under.
-const certKeyFor = domain => certificateKey(config.acme.key, [domain]);
+// The marker lib/certs.js writes for a domain whose last attempt failed. Setting
+// it is how a test keeps a lookup local, with no DNS query and no order.
+const { blockKey } = testables;
 
 // Store a certificate for `domain` that expires at `expires` after a lifetime of
 // `lifetime`, which is what the renewal maths measures against.
-const seedCertificate = async (domain, { expires, lifetime = 90 * DAY, key = 'stored-private-key', cert = 'stored-cert' } = {}) => {
-    const certKey = certKeyFor(domain);
-    await redisClient.hmset(certKey, {
+const seedCertificate = async (
+    domain,
+    {
+        expires,
+        lifetime = 90 * DAY,
+        cert = 'stored-cert',
+        privateKey = 'stored-private-key',
+        ca = ['stored-chain'],
+        serialNumber = '01',
+        fingerprint = 'AA:BB:CC'
+    } = {}
+) => {
+    await certs().setCertificateData(domain, {
+        domain,
+        cert,
+        ca,
+        privateKey,
+        status: 'valid',
+        altNames: [domain],
+        serialNumber,
+        fingerprint,
+        validFrom: new Date(expires - lifetime),
+        validTo: new Date(expires),
+        lastCheck: new Date(),
+        lastError: null,
+        // No test asks a certificate authority for renewal information. Recording
+        // that there was none to be had keeps the renewal check off the network,
+        // and leaves the decision to the lifetime rule.
+        renewalInfo: { serialNumber, fetchedAt: new Date(), unavailable: true, retryAfter: null }
+    });
+
+    return domain;
+};
+
+// Stores an http-01 challenge the way an order in flight would, against the
+// pending certificate record the challenge store expects to find.
+const storeChallenge = async (domain, token, keyAuthorization) => {
+    await certs().setCertificateData(domain, { domain, status: 'pending' });
+    await certs().acmeChallenge.set({ challenge: { identifier: { value: domain }, token, keyAuthorization } });
+};
+
+// The Redis keys releases up to 1.4.x stored the ACME account and a certificate
+// under, which lib/legacy-certs.js imports from.
+const { accountKey: legacyAccountKey, accountSettingKey, certificateKey: legacyCertKey } = legacy;
+
+const seedLegacyAccount = (key, kid) =>
+    redisClient.hmset(legacyAccountKey(), {
+        key,
+        account: JSON.stringify(kid ? { status: 'valid', key: { kid } } : { status: 'valid' }),
+        created: new Date().toISOString()
+    });
+
+const seedLegacyCertificate = (domain, { cert, key, expires, lifetime = 90 * DAY, chain = 'legacy-chain' }) =>
+    redisClient.hmset(legacyCertKey(domain), {
         key,
         cert,
-        chain: 'stored-chain',
+        chain,
         validFrom: new Date(expires - lifetime).toISOString(),
         expires: new Date(expires).toISOString(),
         dnsNames: JSON.stringify([domain]),
         issuer: 'Test CA',
         status: 'valid'
     });
-    return certKey;
-};
 
 // Keep domain validation local: no DNS lookups, no validation endpoint. Returns
 // a restore() that puts the original configuration back.
@@ -333,22 +392,33 @@ const startApplication = async (t, { env = {}, ready = /Server started/ } = {}) 
 };
 
 module.exports = {
+    ACCOUNT_KID,
     DAY,
-    acmeOptions,
-    certKeyFor,
+    accountSettingKey,
+    blockKey,
+    certs,
+    chainCert,
     closeDb,
     config,
     delay,
     flushTestDb,
     isPortFree,
+    issueCertificate,
+    legacyAccountKey,
+    legacyCertKey,
     logRecords,
     redisClient,
     request,
     seedCertificate,
-    startAcmeDirectory,
+    seedLegacyAccount,
+    seedLegacyCertificate,
+    signedCert,
+    signedKey,
     startApplication,
     startRecordingServer,
     startServer,
+    storeChallenge,
+    stubAcme,
     tlsConnect,
     useLocalDomainChecks,
     waitFor

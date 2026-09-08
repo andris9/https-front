@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { closeDb, config, flushTestDb, redisClient, request, startRecordingServer, startServer } = require('./helpers');
+const { closeDb, config, flushTestDb, redisClient, request, startRecordingServer, startServer, storeChallenge } = require('./helpers');
 const { app } = require('../lib/app');
 
 const ACME_PREFIX = '/.well-known/acme-challenge/';
@@ -16,8 +16,6 @@ let originRequests = [];
 
 const originalOrigin = config.proxy.origin;
 const originalHeaders = config.proxy.headers;
-
-const storeChallenge = (domain, token, keyAuthorization) => redisClient.set(`acme:challenge:${config.acme.key}:${domain}:${token}`, keyAuthorization);
 
 test.before(async () => {
     await flushTestDb();
@@ -56,7 +54,8 @@ test('serves a stored ACME challenge', async () => {
     });
 
     assert.equal(res.status, 200);
-    assert.match(res.headers['content-type'], /^text\/plain/);
+    // RFC 8555 section 8.3, the body is compared byte for byte
+    assert.match(res.headers['content-type'], /^application\/octet-stream/);
     assert.equal(res.body, 'token-a.key-authorization');
     // the request must not reach the origin
     assert.equal(originRequests.length, 0);
@@ -84,7 +83,7 @@ test('an unknown challenge token returns 404', async () => {
 });
 
 test('an unexpected lookup failure returns 500 rather than 404', async t => {
-    t.mock.method(redisClient, 'get', async () => {
+    t.mock.method(redisClient, 'getBuffer', async () => {
         throw new Error('redis is unhappy');
     });
 

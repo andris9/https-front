@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const https = require('node:https');
 
 const helpers = require('./helpers');
-const { DAY, certKeyFor, closeDb, config, delay, flushTestDb, redisClient, startAcmeDirectory, tlsConnect } = helpers;
+const { DAY, blockKey, closeDb, config, delay, flushTestDb, redisClient, tlsConnect } = helpers;
 const { getSNIContext, defaultCtx, httpsCredentials, testables } = require('../lib/sni');
 
 const { ctxCache, limits } = testables;
@@ -16,19 +16,14 @@ const { ctxCache, limits } = testables;
 const testKey = fs.readFileSync(config.https.key, 'utf-8');
 const testCert = fs.readFileSync(config.https.cert, 'utf-8');
 
-let directory;
-
-const seedCertificate = (domain, expires) => helpers.seedCertificate(domain, { expires, key: testKey, cert: testCert });
+const seedCertificate = (domain, expires, extra = {}) =>
+    helpers.seedCertificate(domain, Object.assign({ expires, privateKey: testKey, cert: testCert, ca: [] }, extra));
 
 test.before(async () => {
     await flushTestDb();
-    // acme.init() runs before any certificate lookup, so it needs a directory
-    // to fetch even when no certificate is ever ordered.
-    directory = await startAcmeDirectory();
 });
 
 test.after(async () => {
-    await directory.close();
     await closeDb();
 });
 
@@ -65,17 +60,16 @@ test('getSNIContext rejects names that can not hold a certificate', async () => 
 });
 
 test('getSNIContext returns false when no certificate can be served', async () => {
-    // The failsafe lock stands in for a recent provisioning failure. It keeps the
-    // lookup local, so the test never reaches out to DNS or to an ACME server.
-    const certKey = certKeyFor('unknown.example.com');
-    await redisClient.set(`${certKey}:lock`, '1');
+    // The back-off marker stands in for a recent provisioning failure. It keeps
+    // the lookup local, so the test never reaches out to DNS or to an ACME server.
+    await redisClient.set(blockKey('unknown.example.com'), '1');
 
     assert.equal(await getSNIContext('unknown.example.com'), false);
 });
 
 test('getSNIContext returns false for a certificate that has expired', async () => {
-    const certKey = await seedCertificate('stale.example.com', Date.now() - DAY);
-    await redisClient.set(`${certKey}:lock`, '1');
+    await seedCertificate('stale.example.com', Date.now() - DAY);
+    await redisClient.set(blockKey('stale.example.com'), '1');
 
     assert.equal(await getSNIContext('stale.example.com'), false);
 });
@@ -100,7 +94,7 @@ test('a cached context is served without reading Redis again', async t => {
     const first = await getSNIContext('cache.example.com');
     assert.ok(first, 'context created');
 
-    const reads = t.mock.method(redisClient, 'hgetall');
+    const reads = t.mock.method(redisClient, 'hmgetBuffer');
     const second = await getSNIContext('cache.example.com');
 
     assert.equal(second, first, 'the cached context was reused');
@@ -108,12 +102,13 @@ test('a cached context is served without reading Redis again', async t => {
 });
 
 test('a renewed certificate is picked up once the check interval has passed', async () => {
-    const certKey = await seedCertificate('renewed-ctx.example.com', Date.now() + 60 * DAY);
+    await seedCertificate('renewed-ctx.example.com', Date.now() + 60 * DAY);
 
     const first = await getSNIContext('renewed-ctx.example.com');
 
-    // a renewal gives the entry a new expiry
-    await redisClient.hset(certKey, 'expires', new Date(Date.now() + 89 * DAY).toISOString());
+    // a renewal replaces the certificate, and with it the fingerprint the cached
+    // context is matched against
+    await seedCertificate('renewed-ctx.example.com', Date.now() + 89 * DAY, { serialNumber: '02', fingerprint: 'DD:EE:FF' });
 
     // still inside the check interval, so the old context is still served
     assert.equal(await getSNIContext('renewed-ctx.example.com'), first);
@@ -132,9 +127,9 @@ test('an unchanged certificate keeps its context across a revalidation', async (
 });
 
 test('a context is never served past the expiry of its certificate', async () => {
-    const certKey = await seedCertificate('expiring.example.com', Date.now() + 150);
+    await seedCertificate('expiring.example.com', Date.now() + 150);
     // blocked up front, so the lapsed certificate can not be renewed behind the test
-    await redisClient.set(`${certKey}:lock`, '1');
+    await redisClient.set(blockKey('expiring.example.com'), '1');
 
     await getSNIContext('expiring.example.com');
 
@@ -146,12 +141,11 @@ test('a context is never served past the expiry of its certificate', async () =>
 });
 
 test('a domain with no certificate is not looked up on every handshake', async t => {
-    const certKey = certKeyFor('missing.example.com');
-    await redisClient.set(`${certKey}:lock`, '1');
+    await redisClient.set(blockKey('missing.example.com'), '1');
 
     assert.equal(await getSNIContext('missing.example.com'), false);
 
-    const reads = t.mock.method(redisClient, 'hgetall');
+    const reads = t.mock.method(redisClient, 'hmgetBuffer');
     assert.equal(await getSNIContext('missing.example.com'), false);
     assert.equal(reads.mock.callCount(), 0, 'the miss was remembered');
 
@@ -164,7 +158,7 @@ test('a domain with no certificate is not looked up on every handshake', async t
 test('concurrent handshakes for one domain share a single lookup', async t => {
     await seedCertificate('burst.example.com', Date.now() + 60 * DAY);
 
-    const reads = t.mock.method(redisClient, 'hgetall');
+    const reads = t.mock.method(redisClient, 'hmgetBuffer');
     const contexts = await Promise.all(Array.from({ length: 5 }, () => getSNIContext('burst.example.com')));
 
     assert.equal(reads.mock.callCount(), 1, 'one Redis lookup for the whole burst');

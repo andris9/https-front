@@ -20,6 +20,23 @@ test('normalizeDomain', async t => {
         assert.equal(normalizeDomain('xn--tst-qla.de'), 'xn--tst-qla.de');
     });
 
+    await t.test('canonicalizes an A-label the way the certificate store does', () => {
+        // Both of these decode to the same name, and the store would file them
+        // under one record, so they have to arrive as one name here too
+        assert.equal(normalizeDomain('xn--victim-27f.example.com'), 'xn--victim-97f.example.com');
+        assert.equal(normalizeDomain('xn--victim-97f.example.com'), 'xn--victim-97f.example.com');
+
+        // The Kelvin sign lowercases to a plain k, so this A-label is the name
+        // the store would order for. It must be what gets validated as well.
+        assert.equal(normalizeDomain('xn--ban-0k1a.app.example.com'), 'bank.app.example.com');
+    });
+
+    await t.test('is stable, so a normalized name normalizes to itself', () => {
+        for (const name of ['täst.de', 'xn--ban-0k1a.app.example.com', 'ÄÖÜ.example.com', 'sub.example.com']) {
+            assert.equal(normalizeDomain(normalizeDomain(name)), normalizeDomain(name), name);
+        }
+    });
+
     await t.test('handles empty and non-string input', () => {
         assert.equal(normalizeDomain(''), '');
         assert.equal(normalizeDomain(null), '');
