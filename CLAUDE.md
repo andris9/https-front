@@ -7,19 +7,21 @@ instances can share one certificate pool.
 
 ## Layout
 
-| Path                  | Role                                                                     |
-| --------------------- | ------------------------------------------------------------------------ |
-| `server.js`           | Cluster master: forks workers, handles signals, respawns dead workers    |
-| `worker.js`           | Binds the HTTP and HTTPS ports, keeps TLS sessions in Redis              |
-| `lib/app.js`          | Request handler: serves ACME challenges, proxies everything else         |
-| `lib/sni.js`          | SNI callback, the per-domain context cache, default certificate fallback |
-| `lib/certs.js`        | Domain validation, and the certificate store of `@postalsys/certs`       |
-| `lib/legacy-certs.js` | Imports the certificates and ACME account of releases up to 1.4.x        |
-| `lib/check-url.js`    | Optional external allow/deny hook consulted before provisioning          |
-| `lib/proxy-server.js` | `http-proxy-3` instance, access logging, 502 page                        |
-| `lib/tools.js`        | Domain, IP and hostname normalization                                    |
-| `lib/logger.js`       | The process logger, one child per component                              |
-| `config/default.toml` | All settings, documented inline                                          |
+| Path                     | Role                                                                      |
+| ------------------------ | ------------------------------------------------------------------------- |
+| `server.js`              | Cluster master: forks workers, handles signals, respawns dead workers     |
+| `worker.js`              | Binds the HTTP and HTTPS ports, keeps TLS sessions in Redis               |
+| `lib/app.js`             | Request handler: serves ACME challenges, proxies everything else          |
+| `lib/sni.js`             | SNI callback, the per-domain context cache, default certificate fallback  |
+| `lib/certs.js`           | Domain validation, admission control, the store of `@postalsys/certs`     |
+| `lib/rate-limit.js`      | The Redis token buckets and backoff markers admission control is built on |
+| `lib/renewal-sweeper.js` | The timed renewal pass, run by one elected worker per pool                |
+| `lib/legacy-certs.js`    | Imports the certificates and ACME account of releases up to 1.4.x         |
+| `lib/check-url.js`       | Optional external allow/deny hook consulted before provisioning           |
+| `lib/proxy-server.js`    | `http-proxy-3` instance, access logging, 502 page                         |
+| `lib/tools.js`           | Domain, IP and hostname normalization                                     |
+| `lib/logger.js`          | The process logger, one child per component                               |
+| `config/default.toml`    | All settings, documented inline                                           |
 
 ## Conventions
 
@@ -36,11 +38,38 @@ instances can share one certificate pool.
   decision of what to serve while an order runs.
 - Redis key prefixes: everything the store writes lives under
   `acme:<acme.key>:certs:*` (the settings hash, the domain list, challenges and
-  the per-domain locks), `acme:<acme.key>:blocked:<domain>` is the only key
-  `lib/certs.js` writes itself and marks a domain whose last attempt failed, and
-  `tls:*` holds the TLS session tickets. The
-  `acme:account:*` and `acme:certificate:*` hashes of earlier releases are only
-  ever read, by `lib/legacy-certs.js`.
+  the per-domain locks), and `tls:*` holds the TLS session tickets. Under the
+  same `acme:<acme.key>` prefix this application writes its own bookkeeping,
+  which the store knows nothing about: `blocked:<domain>` and `failures:<domain>`
+  are the marker for a domain whose last attempt failed and the count behind it,
+  `paused` and `paused:failures` are the same pair for the whole pool after the
+  CA reported a rate limit, `budget:orders` and `budget:validations` are the two
+  token buckets, and `renewal:leader` is the lease for the renewal pass. All of
+  them are spelled through `poolKey()` in `lib/certs.js`. The `acme:account:*`
+  and `acme:certificate:*` hashes of earlier releases are only ever read, by
+  `lib/legacy-certs.js`.
+- Nothing orders a certificate without spending from a budget first, because the
+  CA counts orders per ACME account and this proxy is fronting far more domains
+  than one account is allowed to order for in a burst. `lib/certs.js` spends
+  twice: once for `validateDomain`, which is what a flood of names that were
+  never pointed here reaches first, and once for the order itself, after the
+  domain has passed validation, so that names failing validation cannot take the
+  order budget. Both buckets keep a `renewalReserve` share back for renewals,
+  because a first issuance that waits is a site that is not up yet while a
+  renewal that waits is a site that goes down.
+- A rate limit is a property of the account rather than of the domain that ran
+  into it, so `urn:ietf:params:acme:error:rateLimited` stops ordering for the
+  whole pool through the `paused` key, doubling for each consecutive one. Do not
+  time that pause from the error's `retryAfter`: the ACME client caps it at a
+  minute before it arrives, because it also uses it as a polling delay.
+- The per-domain block doubles too, and jumps straight to the full hour for
+  anything the CA answered, because the store has already armed its own hour long
+  failsafe for those and re-validating underneath it is pure waste.
+- Renewals are ordered by `lib/renewal-sweeper.js` on a timer as well as by
+  traffic, since a domain quiet enough not to be asked for between its renewal
+  falling due and its certificate expiring would otherwise be renewed from inside
+  the first handshake after it had already stopped working. One tick reads one
+  slice of the pool, not the whole of it.
 - `normalizeDomain` in `lib/tools.js` canonicalizes a name the way the certificate
   store does, by decoding A-labels and composing them, and then encodes the result
   back to A-labels. That is what keeps the name this proxy validates the same as
@@ -55,6 +84,11 @@ instances can share one certificate pool.
   `https.contextCacheTtl` has passed, which is also what bounds how long a
   renewal takes to reach a worker. (Session resumption in `worker.js` does read
   Redis per handshake, on purpose: that is where the session lives.)
+- Domains with nothing stored are remembered in a second cache in `lib/sni.js`,
+  not among the contexts. One shared LRU meant a run of names with no
+  certificate evicted a live context each, so a scan working through a list of
+  domains emptied every worker's cache behind it and left each real handshake
+  afterwards reading Redis and parsing a certificate again.
 
 ## Tests
 
@@ -72,9 +106,13 @@ talk to Let's Encrypt.
 Shared fixtures live in `test/helpers.js` (`stubAcme`, which also answers the
 CAA lookup, `seedCertificate`, `seedLegacyCertificate`, `issueCertificate`,
 `blockKey`, `startRecordingServer`, `useLocalDomainChecks`, `waitFor`). Add to it
-rather than copying a fixture into a second test file.
+rather than copying a fixture into a second test file. `useLimits`,
+`useRenewalSettings` and `setBudget` are the ones for admission control: the
+budgets in `config/test.toml` are wide enough that no test runs into one by
+accident, so a test about a budget narrows it itself.
 
-`lib/certs.js` exports a `testables` object for the suite. It is not public API.
+`lib/certs.js` and `lib/renewal-sweeper.js` export a `testables` object for the
+suite. It is not public API.
 
 ## Releases
 

@@ -23,6 +23,20 @@
     # stub server and point this at it.
     directoryUrl = "http://127.0.0.1:1/directory"
 
+    # Effectively no budget limit, so that a test which is not about admission
+    # control never runs into one. The tests that are about it narrow these with
+    # useLimits() from test/helpers.js instead.
+    [acme.limits]
+        ordersPerHour = 360000
+        orderBurst = 1000
+        validationsPerMinute = 3600000
+        validationBurst = 1000
+
+[renewal]
+    # The renewal pass is driven directly by the test that covers it, so that it
+    # never orders underneath one that is about something else.
+    enabled = false
+
 [proxy]
     # Overridden by the individual tests that start their own origin server.
     origin = "http://127.0.0.1:1/"

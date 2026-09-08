@@ -19,6 +19,13 @@
     # within this window.
     contextCacheTtl = 60
 
+    # How many domains the context cache holds. A handshake for a domain that is
+    # not in it reads the certificate from Redis and parses it again, so this
+    # wants to be read against the number of domains actually being asked for
+    # rather than left at the default. Each entry holds a parsed certificate and
+    # private key, so raising it is paid for in memory.
+    contextCacheSize = 5000
+
     ciphers = "ECDHE-RSA-AES256-GCM-SHA512:DHE-RSA-AES256-GCM-SHA512:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384"
     sessionIdContext = "https-front"
 
@@ -35,6 +42,59 @@
 #    key = "production"
 #    directoryUrl = "https://acme-v02.api.letsencrypt.org/directory"
 #    email = "domainadmin@example.com"
+
+# What this instance is willing to spend, per certificate pool rather than per
+# worker: certificate authorities count orders per ACME account, and every
+# worker sharing a pool shares its account. Both budgets are token buckets held
+# in Redis, refilled continuously rather than in windows.
+[acme.limits]
+    # Sustained order rate and the burst allowed on top of it. The default sits
+    # just under the 300 orders per three hours a Let's Encrypt account gets
+    # without asking, so an untouched configuration stays inside the limit it
+    # actually has. Raise it to match a raised limit, and remember that a fleet
+    # of N domains needs N / (certificate lifetime * 2/3) orders per day just to
+    # keep renewing.
+    ordersPerHour = 90
+    orderBurst = 30
+
+    # The DNS queries and the checkUrl request made before an order. Far more
+    # generous, because this budget protects the resolver and the validation
+    # endpoint rather than the certificate authority. It is also what a flood of
+    # domain names that were never pointed here runs into first: those fail
+    # validation and never reach the CA, but they are not free.
+    validationsPerMinute = 600
+    validationBurst = 100
+
+    # The share of each burst only a renewal may spend into. A first issuance
+    # that waits is a site that is not up yet; a renewal that waits too long is a
+    # site that goes down, so a flood of unknown names cannot take the budget the
+    # fleet already in service needs. 0 lets first issuance drain both buckets.
+    renewalReserve = 0.5
+
+    # How long ordering stops for the whole pool the first time the certificate
+    # authority reports a rate limit, doubling for each consecutive one. A limit
+    # is counted against the account, so continuing to order only spends more
+    # requests discovering the same thing.
+    pauseBase = 900
+    pauseMax = 10800
+
+# Renewals are ordered on a timer as well as by traffic. Without this a domain
+# quiet enough not to be asked for between its renewal falling due and its
+# certificate expiring is renewed by the first visitor after it has already
+# stopped working. One worker runs the pass, elected through Redis.
+[renewal]
+    enabled = true
+
+    # Seconds between ticks. One tick reads one slice, not the whole pool.
+    interval = 60
+
+    # Domains read per tick, which is what decides how much Redis a pass costs.
+    # At the defaults a pool of 100 000 domains comes round every few hours,
+    # against the weeks of slack a renewal has.
+    batchSize = 500
+
+    # Orders started at once out of one slice.
+    concurrency = 4
 
 # Only generate certificates for domain names that pass the following DNS validation
 # At least one of the response rows must match the expected value

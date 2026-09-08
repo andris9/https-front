@@ -9,7 +9,7 @@ const helpers = require('./helpers');
 const { DAY, blockKey, closeDb, config, delay, flushTestDb, redisClient, tlsConnect } = helpers;
 const { getSNIContext, defaultCtx, httpsCredentials, testables } = require('../lib/sni');
 
-const { ctxCache, limits } = testables;
+const { ctxCache, missCache, limits } = testables;
 
 // A real key pair is needed: tls.createSecureContext() parses whatever the SNI
 // handler pulls out of Redis. The bundled default certificate is reused here.
@@ -29,6 +29,7 @@ test.after(async () => {
 
 test.beforeEach(() => {
     ctxCache.clear();
+    missCache.clear();
 });
 
 test.afterEach(() => flushTestDb());
@@ -36,7 +37,8 @@ test.afterEach(() => flushTestDb());
 // Age a cached entry past its check interval, so the next lookup revalidates it
 // without the test having to wait out the real interval.
 const expireCacheEntry = domain => {
-    ctxCache.get(domain).checkAfter = Date.now() - 1;
+    const entry = ctxCache.get(domain) || missCache.get(domain);
+    entry.checkAfter = Date.now() - 1;
 };
 
 test('httpsCredentials carries the default certificate', () => {
@@ -164,6 +166,52 @@ test('concurrent handshakes for one domain share a single lookup', async t => {
     assert.equal(reads.mock.callCount(), 1, 'one Redis lookup for the whole burst');
     assert.equal(new Set(contexts).size, 1, 'every handshake got the same context');
     assert.equal(ctxCache.size, 1);
+});
+
+test('a run of domains with no certificate does not evict the contexts being served', async () => {
+    const originalSize = limits.cacheSize;
+    limits.cacheSize = 2;
+
+    try {
+        await seedCertificate('served.example.com', Date.now() + 60 * DAY);
+        const ctx = await getSNIContext('served.example.com');
+        assert.ok(ctx, 'a context was built');
+
+        // a scan working through names that have nothing stored
+        for (let i = 0; i < 20; i++) {
+            await redisClient.set(blockKey(`scan-${i}.example.com`), '1');
+            assert.equal(await getSNIContext(`scan-${i}.example.com`), false);
+        }
+
+        assert.equal(ctxCache.size, 1, 'the misses went somewhere else');
+        assert.equal(await getSNIContext('served.example.com'), ctx, 'the context that was being served survived the scan');
+        assert.ok(missCache.size > 1, 'and the misses were still remembered');
+    } finally {
+        limits.cacheSize = originalSize;
+    }
+});
+
+test('the misses are bounded too, so a scan cannot grow a worker without limit', async () => {
+    const originalSize = limits.missCacheSize;
+    limits.missCacheSize = 3;
+
+    try {
+        for (let i = 0; i < 10; i++) {
+            await redisClient.set(blockKey(`bounded-${i}.example.com`), '1');
+            await getSNIContext(`bounded-${i}.example.com`);
+        }
+
+        assert.equal(missCache.size, 3, 'the miss cache stayed within its bound');
+    } finally {
+        limits.missCacheSize = originalSize;
+    }
+});
+
+test('the bound on the cache is the configured one', () => {
+    // The number of domains a proxy fronts is what this has to be read against,
+    // so it is a setting rather than an internal.
+    assert.equal(limits.cacheSize, config.https.contextCacheSize);
+    assert.ok(limits.cacheSize > 0);
 });
 
 test('the cache is bounded and evicts the least recently used domain', async () => {
