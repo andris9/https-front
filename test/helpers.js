@@ -156,9 +156,55 @@ const stubAcme = (t, { order, caa } = {}) => {
     };
 };
 
-// The marker lib/certs.js writes for a domain whose last attempt failed. Setting
-// it is how a test keeps a lookup local, with no DNS query and no order.
-const { blockKey } = testables;
+// The keys lib/certs.js writes itself: the marker for a domain whose last
+// attempt failed, the count behind it, the pool wide pause and the two budgets.
+// Setting the marker is how a test keeps a lookup local, with no DNS query and
+// no order.
+const { blockKey, budgetKey, failureKey, pauseKey, pauseFailureKey } = testables;
+
+// Merge `overrides` into a configuration section for one test. Returns a
+// restore() that puts the section back as it was.
+const useConfig = (path, overrides) => {
+    const parts = path.split('.');
+    const key = parts.pop();
+    const parent = parts.reduce((node, part) => node[part], config);
+    const original = parent[key];
+
+    parent[key] = Object.assign({}, original, overrides);
+    return () => {
+        parent[key] = original;
+    };
+};
+
+// Narrow the order and validation budgets for a test that is about admission
+// control. The ones in config/test.toml are wide enough that no other test runs
+// into them.
+const useLimits = overrides => useConfig('acme.limits', overrides);
+
+// Same, for the renewal pass, which config/test.toml leaves switched off so that
+// it never orders underneath a test about something else.
+const useRenewalSettings = overrides => useConfig('renewal', overrides);
+
+// Budgets that refill too slowly to matter while a test runs, so that spends can
+// be counted rather than raced. The bursts are left to the caller: those are
+// what a test about a budget is actually setting.
+const frozenBudget = overrides => useLimits(Object.assign({ ordersPerHour: 0.36, validationsPerMinute: 0.06 }, overrides));
+
+// Writes a bucket the way the Lua script in lib/rate-limit.js reads it back,
+// `ageMs` in the past, which is how a test stands at the edge of a budget, or at
+// a point in its refill, without spending its way there a token at a time.
+const seedBucket = async (key, tokens, ageMs = 0) => {
+    const [seconds, micros] = await redisClient.time();
+    const now = Number(seconds) * 1000 + Math.floor(Number(micros) / 1000);
+    await redisClient.hmset(key, { tokens, updated: now - ageMs });
+};
+
+// The same, for one of the two budgets lib/certs.js keeps.
+const setBudget = (name, tokens) => seedBucket(budgetKey(name), tokens);
+
+// The domains an order stub was asked for, sorted, which is what a test that
+// does not control the order within a batch can assert on.
+const orderedDomains = createCertificate => createCertificate.mock.calls.map(call => call.arguments[0].domains[0]).sort();
 
 // Store a certificate for `domain` that expires at `expires` after a lifetime of
 // `lifetime`, which is what the renewal maths measures against.
@@ -195,6 +241,13 @@ const seedCertificate = async (
 
     return domain;
 };
+
+// Due for renewal: a ninety day certificate with `daysLeft` to go is two thirds
+// of the way through its lifetime once that is under thirty.
+const seedDue = (domain, daysLeft = 20) => seedCertificate(domain, { expires: Date.now() + daysLeft * DAY });
+
+// Nowhere near due: only a third of the lifetime has gone.
+const seedFresh = domain => seedCertificate(domain, { expires: Date.now() + 60 * DAY });
 
 // Stores an http-01 challenge the way an order in flight would, against the
 // pending certificate record the challenge store expects to find.
@@ -396,20 +449,30 @@ module.exports = {
     DAY,
     accountSettingKey,
     blockKey,
+    budgetKey,
     certs,
     chainCert,
     closeDb,
     config,
     delay,
     flushTestDb,
+    failureKey,
+    frozenBudget,
     isPortFree,
     issueCertificate,
     legacyAccountKey,
     legacyCertKey,
     logRecords,
+    orderedDomains,
+    pauseFailureKey,
+    pauseKey,
     redisClient,
     request,
+    seedBucket,
     seedCertificate,
+    seedDue,
+    seedFresh,
+    setBudget,
     seedLegacyAccount,
     seedLegacyCertificate,
     signedCert,
@@ -420,6 +483,9 @@ module.exports = {
     storeChallenge,
     stubAcme,
     tlsConnect,
+    useConfig,
+    useLimits,
     useLocalDomainChecks,
+    useRenewalSettings,
     waitFor
 };

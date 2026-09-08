@@ -14,6 +14,11 @@ Main use case - you want to expose the same origin via unknown amount of domain 
   configuration change
 - Certificates are issued against P-256 keys, which every browser supports and
   which makes for a cheaper handshake than RSA
+- Orders and domain validations are both rate limited against a budget shared by
+  every worker and instance, so a flood of requests for names that have no
+  certificate cannot spend an ACME account's whole allowance
+- Renewals are ordered on a timer as well as on demand, so a domain that is not
+  being asked for still gets renewed before its certificate expires
 - All data is stored in Redis, so you can run several instances in different servers that all share the same certificate pool
 - TLS sessions are shared through Redis as well, so a resumed session can land on any instance
 
@@ -111,8 +116,56 @@ which is how an early renewal after a revocation reaches the proxy.
 
 Renewal happens in the background while the current certificate keeps being
 served. A failed attempt, whether the domain stopped validating or the order
-itself did not go through, blocks further attempts for a few minutes, and the
-existing certificate stays in use until it expires.
+itself did not go through, blocks further attempts for five minutes, doubling for
+each consecutive failure up to an hour, and the existing certificate stays in use
+until it expires.
+
+Renewals are not left to traffic alone. One worker per certificate pool, elected
+through Redis, walks the pool on a timer and renews what has fallen due. Without
+it a domain quiet enough not to be asked for between its renewal falling due and
+its certificate expiring would only be renewed by the first visitor after it had
+already stopped working, from inside that visitor's handshake. A tick reads one
+slice of the pool rather than all of it, so the cost of a pass does not grow with
+the number of domains being fronted. See the `renewal` block in the
+[configuration](config/default.toml).
+
+## Rate Limits
+
+Certificate authorities count orders per ACME account, not per server, and Let's
+Encrypt allows 300 new orders per account every three hours unless you have asked
+for more. A proxy that orders a certificate whenever an unrecognised name arrives
+can spend that in a minute: a scanner working through a list of domains is
+indistinguishable, at the TLS handshake, from a hundred thousand new customers.
+
+Two token buckets in Redis, shared by every worker and every instance using the
+same certificate pool, decide what is allowed to proceed:
+
+- The **validation budget** is spent before the DNS queries and the `checkUrl`
+  request that decide whether a domain may have a certificate at all. It is what
+  a flood reaches first, and it protects your resolver and your validation
+  endpoint rather than the certificate authority.
+- The **order budget** is spent after a domain has passed validation, immediately
+  before the order. Spending it last is deliberate: names that were never pointed
+  at this proxy fail validation and never reach the CA, so they cannot take the
+  allowance real domains need.
+
+Both buckets hold a share back, `renewalReserve`, that only a renewal may spend
+into. A first issuance that has to wait is a site that is not up yet; a renewal
+that waits too long is a site that goes down, so the fleet already in service
+gets the last of the budget.
+
+When the certificate authority does report a rate limit, ordering stops for the
+whole pool rather than for the one domain that ran into it, because the limit
+belongs to the account. Each consecutive report doubles the wait, up to the three
+hour window the limit is counted over, and the next successful order resets it.
+While the pool is paused, certificates already issued keep being served.
+
+Sizing the order budget is the part worth doing by hand. A fleet of N domains
+needs roughly `N / (certificate lifetime * 2/3)` orders per day just to keep
+renewing, so 100 000 domains on 90 day certificates need about 1 700 a day, and
+about 3 300 a day once lifetimes reach 45 days. Set `acme.limits.ordersPerHour`
+from the allowance the CA has actually granted the account, and ask for more if
+the arithmetic does not fit inside it.
 
 Each worker keeps a bounded cache of TLS contexts so that a handshake does not
 have to read the certificate out of Redis every time. An entry is revalidated

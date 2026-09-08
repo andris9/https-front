@@ -7,6 +7,7 @@ const config = require('@zone-eu/wild-config');
 const { httpsCredentials } = require('./lib/sni');
 const { redisClient } = require('./lib/db');
 const { app } = require('./lib/app');
+const renewalSweeper = require('./lib/renewal-sweeper');
 
 const { componentLogger } = require('./lib/logger');
 const logger = componentLogger('worker');
@@ -90,6 +91,13 @@ start()
                 return setTimeout(() => process.exit(1), 3000);
             }
         }
+
+        // Started after the ports are bound and the process has dropped its
+        // privileges, so that a worker that never got that far never renews.
+        // Every worker starts one and only the one that takes the lease runs a
+        // pass, which is also what puts the pass back somewhere else when this
+        // worker dies.
+        renewalSweeper.start();
 
         logger.info('Server started');
     })
