@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.0](https://github.com/andris9/https-front/compare/v1.4.1...v2.0.0) (2026-09-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* certificates, private keys and the ACME account live in a new Redis layout under acme:<acme.key>:certs:*. An instance upgraded in place imports its account before the first order, and each certificate the first time its domain is looked up, so nothing is re-ordered from Let's Encrypt and the old entries are left to expire. A downgrade to 1.4.x will not see anything issued after the upgrade.
+
+### Features
+
+* replace the [@root](https://github.com/root) ACME stack with @postalsys/certs ([69dbbe8](https://github.com/andris9/https-front/commit/69dbbe8dfc62adf63a3f3fb9d595d65b5eb06787))
+
 ## [1.4.1](https://github.com/andris9/https-front/compare/v1.4.0...v1.4.1) (2026-09-01)
 
 
