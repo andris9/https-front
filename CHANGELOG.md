@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.0](https://github.com/andris9/https-front/compare/v2.0.0...v2.1.0) (2026-09-08)
+
+
+### Features
+
+* pace ACME orders against a shared budget and renew on a timer ([#14](https://github.com/andris9/https-front/issues/14)) ([5ec84b7](https://github.com/andris9/https-front/commit/5ec84b706246b5a4ac04acf4aebea06c1fbef7b6))
+
 ## [2.0.0](https://github.com/andris9/https-front/compare/v1.4.1...v2.0.0) (2026-09-08)
 
 
