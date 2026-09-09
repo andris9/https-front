@@ -24,6 +24,7 @@ const {
     redisClient,
     seedDue,
     seedFresh,
+    seedStoreLock,
     setBudget,
     stubAcme,
     useLocalDomainChecks
@@ -177,6 +178,49 @@ test('a failure recorded by an earlier attempt does not pause the pool all over 
     assert.equal(createCertificate.mock.callCount(), 0, 'nothing was ordered');
     assert.equal(await redisClient.exists(pauseKey()), 0, 'the pool was not paused by a rate limit that is hours old');
     assert.equal(await redisClient.exists(blockKey('historic.example.com')), 0, 'and a healthy domain was not blocked for it');
+});
+
+test('a renewal the store would not attempt backs the domain off instead of reading as a success', async t => {
+    const { createCertificate } = stubAcme(t, { order: issueCertificate });
+
+    // A certificate that is due, on a domain the store has already written off:
+    // its own failsafe lock from an earlier failure is still holding, so it
+    // answers from the record without ordering anything and says that it did.
+    await seedDue('locked.example.com');
+    await seedStoreLock('locked.example.com');
+
+    const served = await renew('locked.example.com');
+    assert.equal(served.cert, 'stored-cert', 'the certificate in place is still served');
+    assert.equal(createCertificate.mock.callCount(), 0, 'nothing was ordered');
+
+    // Without this every handshake would run validateDomain and spend from both
+    // budgets again, underneath a lock that is going to refuse either way.
+    const ttl = await redisClient.ttl(blockKey('locked.example.com'));
+    assert.ok(ttl > 0 && ttl <= BLOCK_RENEW_AFTER_FAILURE_TTL, `unexpected block ttl ${ttl}`);
+});
+
+test("the rate limit that armed the store's lock is not one the pool stops for all over again", async t => {
+    const { createCertificate } = stubAcme(t, { order: issueCertificate });
+
+    // The same refusal, on a domain whose lock was armed by a rate limit hours
+    // ago. The store reports that failure, timestamp and all, because it is the
+    // reason this renewal is not happening.
+    await seedDue('relimited.example.com');
+    await certs().setCertificateData('relimited.example.com', {
+        lastError: { err: '[429] too many new orders', code: null, type: RATE_LIMITED, time: new Date(Date.now() - 4 * 3600 * 1000) }
+    });
+    await seedStoreLock('relimited.example.com');
+
+    const served = await renew('relimited.example.com');
+    assert.equal(served.cert, 'stored-cert');
+    assert.equal(createCertificate.mock.callCount(), 0, 'nothing was ordered');
+
+    // Pausing every domain again each time that one record is read would
+    // escalate the pause until the pool never came back.
+    assert.equal(await redisClient.exists(pauseKey()), 0, 'the pool was not paused by a rate limit that is hours old');
+
+    // The domain backs off all the same: this renewal did not happen.
+    assert.ok((await redisClient.ttl(blockKey('relimited.example.com'))) > 0, 'the domain was left alone for a while');
 });
 
 test('an error the certificate authority answered with blocks the domain for as long as the store does', async t => {

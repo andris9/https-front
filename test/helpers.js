@@ -17,7 +17,7 @@ if (!process.env.NODE_ENV) {
 
 const config = require('@zone-eu/wild-config');
 const { redisClient } = require('../lib/db');
-const { testables } = require('../lib/certs');
+const { poolKey, testables } = require('../lib/certs');
 const legacy = require('../lib/legacy-certs').testables;
 
 // The certificate store lib/certs.js works through. Built on first use, so this
@@ -241,6 +241,14 @@ const seedCertificate = async (
 
     return domain;
 };
+
+// The store's own failsafe lock, which it arms for an hour after a failed order
+// and refuses to attempt anything for the domain until it expires. Armed by a
+// test to stand where a second worker stands after the first one failed: the
+// store answers from the record without ordering, and says so.
+const storeLockKey = domain => poolKey(`certs:lock:safe:${domain}`);
+
+const seedStoreLock = (domain, ttl = 3600) => redisClient.set(storeLockKey(domain), 1, 'EX', ttl);
 
 // Due for renewal: a ninety day certificate with `daysLeft` to go is two thirds
 // of the way through its lifetime once that is under thirty.
@@ -472,6 +480,7 @@ module.exports = {
     seedCertificate,
     seedDue,
     seedFresh,
+    seedStoreLock,
     setBudget,
     seedLegacyAccount,
     seedLegacyCertificate,
