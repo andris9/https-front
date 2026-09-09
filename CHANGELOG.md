@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.1](https://github.com/andris9/https-front/compare/v2.1.0...v2.1.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **certs:** back a domain off when the store refuses to renew it ([02862ed](https://github.com/andris9/https-front/commit/02862eda1e695e1d0b6e0a6f06159235cbe5ec09))
+* **deps:** update @postalsys/certs to 1.4.0 ([e6b2019](https://github.com/andris9/https-front/commit/e6b20191f9c878dccc9544786d06e3d4f77da1ce))
+
 ## [2.1.0](https://github.com/andris9/https-front/compare/v2.0.0...v2.1.0) (2026-09-08)
 
 
