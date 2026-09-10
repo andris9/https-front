@@ -88,7 +88,15 @@ instances can share one certificate pool.
   as well as on the dot: spelling that set out here is how the guard went stale
   once already, decoding `xn--tst-qla.de` but not `bank。xn--tst-qla.de`. A test
   in `test/tools.test.js` runs the awkward names through the store's own
-  canonicalization and fails if the two ever disagree.
+  canonicalization and fails if the two ever disagree. Decoding runs to a fixpoint
+  for the same reason: `xn--xn--ban-0k1a-.example.com` decodes to
+  `xn--ban-0k1a.example.com`, which is still an A-label, and one pass here plus
+  another in the store is again two different names. The fixpoint is what
+  `isValidDomain` insists on rather than what the decode loop's bound promises: a
+  name that is neither spelling of itself is one the loop ran out of passes on, and
+  the store, which starts with a fresh budget of its own, would carry on decoding
+  it. Names nest deeply enough to reach that bound, so it is a rejection rather
+  than a formality.
 - Certificates are renewed once two thirds of their lifetime has passed, never on
   a fixed number of days left, because Let's Encrypt is shortening certificate
   lifetimes. The rule, and the RFC 9773 renewal information that overrides it,

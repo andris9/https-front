@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { normalizeDomain, unicodeDomain, isValidDomain, normalizeIp, getHostname } = require('../lib/tools');
+const { normalizeDomain, unicodeDomain, alabelDomain, isValidDomain, normalizeIp, getHostname } = require('../lib/tools');
 const store = require('@postalsys/certs/lib/tools');
 
 // Awkward names, kept in one place: an A-label after each of the separators
@@ -15,6 +15,8 @@ const NAMES = [
     'bank\uFF0Exn--tst-qla.de',
     'bank\uFF61xn--tst-qla.de',
     't\u00e4st\u3002de',
+    'xn--xn--ban-0k1a-.example.com',
+    'te\u0301st.com',
     'xn--ban-0k1a.app.example.com',
     'xn--tst-qla.de',
     't\u00e4st.de',
@@ -49,9 +51,22 @@ test('normalizeDomain', async t => {
     });
 
     await t.test('is stable, so a normalized name normalizes to itself', () => {
-        for (const name of ['täst.de', 'xn--ban-0k1a.app.example.com', 'ÄÖÜ.example.com', 'sub.example.com']) {
+        for (const name of NAMES) {
             assert.equal(normalizeDomain(normalizeDomain(name)), normalizeDomain(name), name);
         }
+    });
+
+    await t.test('decodes a name that is encoded more than once', () => {
+        // `xn--xn--ban-0k1a-.example.com` decodes to `xn--ban-0k1a.example.com`,
+        // which is still an A-label and decodes again to `bank.example.com`. One
+        // pass leaves a name the store would decode a second time on its way to
+        // the CA, which is this proxy validating one name and ordering another
+        assert.equal(normalizeDomain('xn--xn--ban-0k1a-.example.com'), 'bank.example.com');
+        assert.equal(normalizeDomain('de.xn--xn--ban-0k1a-.app'), 'de.bank.app');
+    });
+
+    await t.test('composes a name that arrives decomposed', () => {
+        assert.equal(normalizeDomain('te\u0301st.com'), normalizeDomain('t\u00e9st.com'));
     });
 
     await t.test('canonicalizes an A-label after any separator punycode folds', () => {
@@ -113,6 +128,14 @@ test('unicodeDomain', async t => {
         }
     });
 
+    await t.test('decodes until nothing is left encoded', () => {
+        assert.equal(unicodeDomain('xn--xn--ban-0k1a-.example.com'), 'bank.example.com');
+    });
+
+    await t.test('composes a name that arrives decomposed', () => {
+        assert.equal(unicodeDomain('te\u0301st.com'), 't\u00e9st.com');
+    });
+
     await t.test('folds the separators punycode treats as label ends', () => {
         assert.equal(unicodeDomain('t\u00e4st\u3002de'), 't\u00e4st.de');
         assert.equal(unicodeDomain('bank\u3002xn--tst-qla.de'), 'bank.t\u00e4st.de');
@@ -146,9 +169,63 @@ test('isValidDomain', async t => {
         assert.equal(isValidDomain('xn--9999999999999999999a.example.com'), false);
     });
 
+    await t.test('turns down a name the decode could not finish', () => {
+        // More levels of encoding than unicodeDomain makes passes, so what comes
+        // back is still an A-label and the store, which starts with a budget of
+        // its own, would decode the rest on its way to the CA. Validating one
+        // name and ordering another is the one thing the round trip is for.
+        //
+        // The second name is what that looks like as an attack: every level is a
+        // legal hostname label, because the Kelvin sign in the payload makes
+        // punycode emit a delta suffix instead of the bare trailing hyphen that
+        // Joi would have rejected, and it collapses to a plain `k` on the way
+        // down. The handshake path normalizes in lib/sni.js and again in
+        // lib/certs.js, so one pass is not the end of it.
+        for (const nested of [
+            'xn--xn--xn--xn--xn--xn--bank------.example.com',
+            'xn--xn--xn--xn--xn--xn--xn--xn--xn--xn--xn--ban-01a-----8p2t-----.example.com'
+        ]) {
+            const half = normalizeDomain(nested);
+            assert.notEqual(normalizeDomain(half), half, nested);
+            assert.equal(isValidDomain(half), false, nested);
+
+            // Normalizing again does converge in the end, and the name is fine to
+            // accept once it has, so what has to hold is not that it is turned
+            // down forever but that it is never accepted while the store would
+            // still order something else.
+            let domain = nested;
+            for (let pass = 0; pass < 4; pass++) {
+                domain = normalizeDomain(domain);
+                if (isValidDomain(domain)) {
+                    assert.equal(store.toAsciiDomain(store.normalizeDomain(domain)), domain, nested);
+                }
+            }
+        }
+    });
+
+    await t.test('accepts the spelling the certificate store keeps as well', () => {
+        // The renewal pass reads its domains from the store, which holds them
+        // with their A-labels decoded
+        assert.equal(isValidDomain('täst.de'), true);
+        assert.equal(isValidDomain('xn--tst-qla.de'), true);
+    });
+
     await t.test('turns down what is not a domain at all', () => {
         assert.equal(isValidDomain('not a domain'), false);
         assert.equal(isValidDomain(''), false);
+    });
+});
+
+test('alabelDomain', async t => {
+    await t.test('encodes a decoded name back to the wire form', () => {
+        assert.equal(alabelDomain('täst.de'), 'xn--tst-qla.de');
+        assert.equal(alabelDomain('sub.example.com'), 'sub.example.com');
+    });
+
+    await t.test('is the other half of normalizeDomain', () => {
+        for (const name of NAMES) {
+            assert.equal(alabelDomain(unicodeDomain(name)), normalizeDomain(name), name);
+        }
     });
 });
 
