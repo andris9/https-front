@@ -31,7 +31,15 @@ instances can share one certificate pool.
   `config/default.toml` is merged with `config/<NODE_ENV>.toml`, and any value can
   be overridden from the environment as `appconf_<section>_<key>`.
 - Logging is pino through `lib/logger.js`: `componentLogger('name')` per module,
-  with the level taken from `log.level` in the configuration.
+  with the level taken from `log.level` in the configuration. A name reaches a log
+  line either as an A-label, which is how everything else here spells it, or off
+  the wire as the client sent it, so a pino `formatters.log` hook in that module
+  puts the fields carrying one (`domain`, `subdomain`, `servername`, `altNames`)
+  through `unicodeDomain` on the way out, and writes the A-label next to it in
+  `<field>Alabel` when the two spellings differ. Log lines are read by people, and
+  one domain should read one way, but the A-label is what the certificate, the
+  Redis keys and the CA's own logs carry, so it stays greppable. Errors thrown with
+  a name in the message spell it the same way, through `unicodeDomain` as well.
 - ACME, the certificate store and the renewal schedule are
   [@postalsys/certs](https://github.com/postalsys/certs). `lib/certs.js` only adds
   the domain validation this proxy does before it is willing to order, and the

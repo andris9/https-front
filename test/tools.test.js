@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { normalizeDomain, normalizeIp, getHostname } = require('../lib/tools');
+const { normalizeDomain, unicodeDomain, isValidDomain, normalizeIp, getHostname } = require('../lib/tools');
 
 test('normalizeDomain', async t => {
     await t.test('lowercases and trims', () => {
@@ -37,12 +37,73 @@ test('normalizeDomain', async t => {
         }
     });
 
+    await t.test('leaves an A-label that does not decode as it is', () => {
+        // punycode.toUnicode throws on each of these rather than returning them
+        assert.equal(normalizeDomain('xn--0.example.com'), 'xn--0.example.com');
+        assert.equal(normalizeDomain('xn--9999999999999999999a.example.com'), 'xn--9999999999999999999a.example.com');
+        assert.equal(normalizeDomain('XN---.example.com'), 'xn---.example.com');
+    });
+
     await t.test('handles empty and non-string input', () => {
         assert.equal(normalizeDomain(''), '');
         assert.equal(normalizeDomain(null), '');
         assert.equal(normalizeDomain(undefined), '');
         assert.equal(normalizeDomain(false), '');
         assert.equal(normalizeDomain(123), '123');
+    });
+});
+
+test('unicodeDomain', async t => {
+    await t.test('decodes A-labels back to the characters they stand for', () => {
+        assert.equal(unicodeDomain('xn--tst-qla.de'), 'täst.de');
+        assert.equal(unicodeDomain('xn--4ca0bs.example.com'), 'äöü.example.com');
+    });
+
+    await t.test('canonicalizes a name that arrived as unicode', () => {
+        assert.equal(unicodeDomain('  TÄST.de '), 'täst.de');
+    });
+
+    await t.test('leaves ascii domains untouched', () => {
+        assert.equal(unicodeDomain('sub.example.com'), 'sub.example.com');
+    });
+
+    await t.test('is the decoded half of normalizeDomain, so both agree on the name', () => {
+        for (const name of ['täst.de', 'xn--tst-qla.de', 'xn--ban-0k1a.app.example.com', 'ÄÖÜ.example.com', 'sub.example.com']) {
+            assert.equal(normalizeDomain(unicodeDomain(name)), normalizeDomain(name), name);
+        }
+    });
+
+    await t.test('leaves an A-label that does not decode as it is', () => {
+        assert.equal(unicodeDomain('xn--0.example.com'), 'xn--0.example.com');
+        assert.equal(unicodeDomain('xn--9999999999999999999a.example.com'), 'xn--9999999999999999999a.example.com');
+        assert.equal(unicodeDomain('XN---.example.com'), 'xn---.example.com');
+    });
+
+    await t.test('handles empty and non-string input', () => {
+        assert.equal(unicodeDomain(''), '');
+        assert.equal(unicodeDomain(null), '');
+        assert.equal(unicodeDomain(undefined), '');
+        assert.equal(unicodeDomain(123), '123');
+    });
+});
+
+test('isValidDomain', async t => {
+    await t.test('accepts names that can hold a certificate', () => {
+        assert.equal(isValidDomain('example.com'), true);
+        assert.equal(isValidDomain('sub.example.com'), true);
+        assert.equal(isValidDomain(normalizeDomain('täst.de')), true);
+    });
+
+    await t.test('turns down an A-label that does not decode', () => {
+        // Joi passes these, since they are well formed as ASCII, but no
+        // certificate can be ordered for a name the CA cannot decode either
+        assert.equal(isValidDomain('xn--0.example.com'), false);
+        assert.equal(isValidDomain('xn--9999999999999999999a.example.com'), false);
+    });
+
+    await t.test('turns down what is not a domain at all', () => {
+        assert.equal(isValidDomain('not a domain'), false);
+        assert.equal(isValidDomain(''), false);
     });
 });
 
