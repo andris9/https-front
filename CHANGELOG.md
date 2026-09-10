@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.0](https://github.com/andris9/https-front/compare/v2.1.2...v2.2.0) (2026-09-10)
+
+
+### Features
+
+* **logging:** spell domain names in unicode, with the a-label alongside ([379d3eb](https://github.com/andris9/https-front/commit/379d3eb0594ad48b22b46777f68e78fd00594cc8))
+
 ## [2.1.2](https://github.com/andris9/https-front/compare/v2.1.1...v2.1.2) (2026-09-10)
 
 
