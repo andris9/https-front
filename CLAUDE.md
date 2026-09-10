@@ -82,7 +82,13 @@ instances can share one certificate pool.
   store does, by decoding A-labels and composing them, and then encodes the result
   back to A-labels. That is what keeps the name this proxy validates the same as
   the name the order carries: without the round trip `xn--ban-0k1a.example.com`
-  is checked as itself and ordered as `bank.example.com`.
+  is checked as itself and ordered as `bank.example.com`. Which names take that
+  trip is decided by `hasOneSpelling`, not by looking for an A-label at a label
+  boundary, because punycode ends a label on the ideographic and fullwidth stops
+  as well as on the dot: spelling that set out here is how the guard went stale
+  once already, decoding `xn--tst-qla.de` but not `bank。xn--tst-qla.de`. A test
+  in `test/tools.test.js` runs the awkward names through the store's own
+  canonicalization and fails if the two ever disagree.
 - Certificates are renewed once two thirds of their lifetime has passed, never on
   a fixed number of days left, because Let's Encrypt is shortening certificate
   lifetimes. The rule, and the RFC 9773 renewal information that overrides it,

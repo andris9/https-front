@@ -4,6 +4,23 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { normalizeDomain, unicodeDomain, isValidDomain, normalizeIp, getHostname } = require('../lib/tools');
+const store = require('@postalsys/certs/lib/tools');
+
+// Awkward names, kept in one place: an A-label after each of the separators
+// punycode folds into a dot, one that decodes to a different name than it looks
+// like, and the plain cases for company.
+const NAMES = [
+    'S\u3002xn--tea00ivdq0bn23h2w0x.de',
+    'bank\u3002xn--tst-qla.de',
+    'bank\uFF0Exn--tst-qla.de',
+    'bank\uFF61xn--tst-qla.de',
+    't\u00e4st\u3002de',
+    'xn--ban-0k1a.app.example.com',
+    'xn--tst-qla.de',
+    't\u00e4st.de',
+    '\u00c4\u00d6\u00dc.example.com',
+    'sub.example.com'
+];
 
 test('normalizeDomain', async t => {
     await t.test('lowercases and trims', () => {
@@ -34,6 +51,29 @@ test('normalizeDomain', async t => {
     await t.test('is stable, so a normalized name normalizes to itself', () => {
         for (const name of ['täst.de', 'xn--ban-0k1a.app.example.com', 'ÄÖÜ.example.com', 'sub.example.com']) {
             assert.equal(normalizeDomain(normalizeDomain(name)), normalizeDomain(name), name);
+        }
+    });
+
+    await t.test('canonicalizes an A-label after any separator punycode folds', () => {
+        // U+3002, U+FF0E and U+FF61 end a label just as the dot does. An A-label
+        // that follows one has to go through the same round trip, or the name is
+        // validated here as itself and ordered by the store as something else:
+        // `s\u3002xn--tea00ivdq0bn23h2w0x.de` would be ordered as
+        // `s.xn--tea00ivdq0bn23hk20x.de`
+        assert.equal(normalizeDomain('S\u3002xn--tea00ivdq0bn23h2w0x.de'), 's.xn--tea00ivdq0bn23hk20x.de');
+        assert.equal(normalizeDomain('bank\u3002xn--tst-qla.de'), 'bank.xn--tst-qla.de');
+        assert.equal(normalizeDomain('bank\uFF0Exn--tst-qla.de'), 'bank.xn--tst-qla.de');
+        assert.equal(normalizeDomain('bank\uFF61xn--tst-qla.de'), 'bank.xn--tst-qla.de');
+        assert.equal(normalizeDomain('t\u00e4st\u3002de'), 'xn--tst-qla.de');
+    });
+
+    await t.test('agrees with the certificate store on the name it will order', () => {
+        // The store canonicalizes the name again on its way to the CA. This is
+        // the invariant the round trip exists for, and it fails loudly here if
+        // either side of it moves.
+        for (const name of NAMES) {
+            const ours = normalizeDomain(name);
+            assert.equal(store.toAsciiDomain(store.normalizeDomain(ours)), ours, name);
         }
     });
 
@@ -71,6 +111,11 @@ test('unicodeDomain', async t => {
         for (const name of ['täst.de', 'xn--tst-qla.de', 'xn--ban-0k1a.app.example.com', 'ÄÖÜ.example.com', 'sub.example.com']) {
             assert.equal(normalizeDomain(unicodeDomain(name)), normalizeDomain(name), name);
         }
+    });
+
+    await t.test('folds the separators punycode treats as label ends', () => {
+        assert.equal(unicodeDomain('t\u00e4st\u3002de'), 't\u00e4st.de');
+        assert.equal(unicodeDomain('bank\u3002xn--tst-qla.de'), 'bank.t\u00e4st.de');
     });
 
     await t.test('leaves an A-label that does not decode as it is', () => {

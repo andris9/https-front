@@ -52,6 +52,14 @@ test('log domain formatting', async t => {
         );
     });
 
+    await t.test('spells a name whose labels are split by an ideographic stop', () => {
+        // punycode ends a label on U+3002, U+FF0E and U+FF61 as well as on the dot
+        assert.deepEqual(formatDomains({ servername: 'bank\u3002xn--tst-qla.de' }), {
+            servername: 'bank.täst.de',
+            servernameAlabel: 'bank.xn--tst-qla.de'
+        });
+    });
+
     await t.test('writes the A-label next to the name it belongs to', () => {
         const entry = formatDomains({ msg: 'Proxy access', ip: '1.2.3.4', domain: 'xn--tst-qla.de', url: '/', response: 200 });
         assert.deepEqual(Object.keys(entry), ['msg', 'ip', 'domain', 'domainAlabel', 'url', 'response']);
