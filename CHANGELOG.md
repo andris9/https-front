@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/andris9/https-front/compare/v2.1.1...v2.1.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* **logging:** log the client address as ip ([c2f9be7](https://github.com/andris9/https-front/commit/c2f9be756cd32b44a1d78b781a25727edee62d49))
+
 ## [2.1.1](https://github.com/andris9/https-front/compare/v2.1.0...v2.1.1) (2026-09-09)
 
 
