@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.1](https://github.com/andris9/https-front/compare/v2.2.0...v2.2.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **tools:** decode A-labels wherever punycode ends a label ([df22d60](https://github.com/andris9/https-front/commit/df22d6078462aeffc3cae712dd6b26bae74562b1))
+* **tools:** turn down a name whose decode did not finish ([233b152](https://github.com/andris9/https-front/commit/233b152ca4ff5c7987ae3fefecdeab3ed3b92c26))
+
 ## [2.2.0](https://github.com/andris9/https-front/compare/v2.1.2...v2.2.0) (2026-09-10)
 
 
